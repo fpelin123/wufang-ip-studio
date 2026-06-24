@@ -26,6 +26,16 @@ export type StudioReviewIssue = ReviewIssue & {
   createdAt?: string
 }
 
+export type StudioAsset = {
+  id: string
+  projectId: string
+  name: string
+  type: string
+  size: number
+  category: "document" | "image" | "video" | "audio" | "other"
+  addedAt: string
+}
+
 const keys = {
   projects: "wufang.projects",
   providers: "wufang.providers",
@@ -34,6 +44,7 @@ const keys = {
   documentPrefix: "wufang.document.",
   workflowDocumentPrefix: "wufang.workflowDocument.",
   reviewIssues: "wufang.reviewIssues",
+  assetPrefix: "wufang.assets.",
 }
 
 export const projectTypes = ["AI漫剧", "微短剧", "IP样片", "文旅方案", "AIGC培训", "自定义"]
@@ -167,6 +178,7 @@ export function getStoredProviders(): StudioProvider[] {
 
 export function saveStoredProviders(value: StudioProvider[]) {
   writeJson(keys.providers, value)
+  window.dispatchEvent(new CustomEvent("wufang:providers-change"))
 }
 
 export function getDefaultTextProvider() {
@@ -217,6 +229,56 @@ export function updateStoredReviewIssue(id: string, patch: Partial<StudioReviewI
   )
   saveStoredReviewIssues(next)
   window.dispatchEvent(new CustomEvent("wufang:review-issues-change", { detail: id }))
+}
+
+function getProjectAssetKey(projectId: string) {
+  return `${keys.assetPrefix}${projectId}`
+}
+
+export function getStoredAssets(projectId: string): StudioAsset[] {
+  return readJson<StudioAsset[]>(getProjectAssetKey(projectId), [])
+}
+
+export function saveStoredAssets(projectId: string, value: StudioAsset[]) {
+  writeJson(getProjectAssetKey(projectId), value)
+  window.dispatchEvent(new CustomEvent("wufang:assets-change", { detail: projectId }))
+}
+
+function getAssetCategory(file: File): StudioAsset["category"] {
+  if (file.type.startsWith("image/")) return "image"
+  if (file.type.startsWith("video/")) return "video"
+  if (file.type.startsWith("audio/")) return "audio"
+  if (
+    file.type.includes("pdf") ||
+    file.type.includes("word") ||
+    file.type.includes("text") ||
+    /\.(pdf|docx?|txt|md)$/i.test(file.name)
+  ) {
+    return "document"
+  }
+  return "other"
+}
+
+export function addStoredAssets(projectId: string, files: File[]) {
+  const existing = getStoredAssets(projectId)
+  const addedAt = new Date().toLocaleString("zh-CN", { hour12: false })
+  const nextAssets = files.map((file) => ({
+    id: `${projectId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    projectId,
+    name: file.name,
+    type: file.type || "unknown",
+    size: file.size,
+    category: getAssetCategory(file),
+    addedAt,
+  }))
+  const next = [...nextAssets, ...existing]
+  saveStoredAssets(projectId, next)
+  return nextAssets
+}
+
+export function removeStoredAsset(projectId: string, assetId: string) {
+  const next = getStoredAssets(projectId).filter((asset) => asset.id !== assetId)
+  saveStoredAssets(projectId, next)
 }
 
 export function createProjectId(name: string) {

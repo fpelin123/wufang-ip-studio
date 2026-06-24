@@ -43,6 +43,7 @@ const taskBindings = [
 
 export default function SettingsPage() {
   const [list, setList] = useState<StudioProvider[]>([])
+  const [testingId, setTestingId] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [type, setType] = useState("OpenAI-compatible")
   const [baseUrl, setBaseUrl] = useState("")
@@ -61,6 +62,55 @@ export default function SettingsPage() {
   const toggle = (id: string) => {
     const next = list.map((p) => (p.id === id ? { ...p, enabled: !p.enabled } : p))
     updateList(next)
+  }
+
+  const testProvider = async (provider: StudioProvider) => {
+    setTestingId(provider.id)
+    try {
+      const response = await fetch("/api/providers/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(provider),
+      })
+      const data = await response.json()
+      const status: StudioProvider["status"] = response.ok && data.ok ? "connected" : "error"
+      updateList(list.map((item) => (item.id === provider.id ? { ...item, status } : item)))
+      if (status === "connected") {
+        toast.success("连接测试通过", { description: provider.name })
+      } else {
+        toast.error("连接测试失败", {
+          description: data?.error ?? "请检查 Base URL、API Key 和模型名。",
+        })
+      }
+    } catch (error) {
+      updateList(list.map((item) => (item.id === provider.id ? { ...item, status: "error" } : item)))
+      toast.error("连接测试失败", {
+        description: error instanceof Error ? error.message : "请检查网络或供应商配置。",
+      })
+    } finally {
+      setTestingId(null)
+    }
+  }
+
+  const testDraftProvider = async () => {
+    if (!name.trim() || !baseUrl.trim() || !textModel.trim()) {
+      toast.error("请填写名称、Base URL 和文本模型")
+      return
+    }
+
+    await testProvider({
+      id: "__draft__",
+      name: name.trim(),
+      type,
+      baseUrl: baseUrl.trim(),
+      apiKey: apiKey.trim(),
+      textModel: textModel.trim(),
+      longModel: textModel.trim(),
+      visionModel: "—",
+      imageModel: "—",
+      enabled: true,
+      status: "untested",
+    })
   }
 
   const saveProvider = () => {
@@ -119,6 +169,7 @@ export default function SettingsPage() {
                 <TableHead>视觉模型</TableHead>
                 <TableHead>图像模型</TableHead>
                 <TableHead>状态</TableHead>
+                <TableHead className="text-right">测试</TableHead>
                 <TableHead className="pr-6 text-right">启用</TableHead>
               </TableRow>
             </TableHeader>
@@ -143,6 +194,16 @@ export default function SettingsPage() {
                         <StatusIcon className="size-3.5" />
                         {meta.label}
                       </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => testProvider(p)}
+                        disabled={testingId === p.id}
+                      >
+                        {testingId === p.id ? "测试中" : "测试"}
+                      </Button>
                     </TableCell>
                     <TableCell className="pr-6 text-right">
                       <Switch checked={p.enabled} onCheckedChange={() => toggle(p.id)} />
@@ -221,8 +282,8 @@ export default function SettingsPage() {
                 />
               </Field>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => toast.info("正在测试连接…")}>
-                  测试连接
+                <Button variant="outline" onClick={testDraftProvider} disabled={testingId === "__draft__"}>
+                  {testingId === "__draft__" ? "测试中" : "测试连接"}
                 </Button>
                 <Button onClick={saveProvider}>保存供应商</Button>
               </div>

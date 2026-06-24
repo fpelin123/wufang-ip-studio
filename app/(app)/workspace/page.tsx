@@ -6,6 +6,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Download,
+  PackageOpen,
   Eye,
   Pencil,
   FileText,
@@ -14,12 +15,12 @@ import {
   Clock,
   AlertTriangle,
   ChevronRight,
-  Paperclip,
   Boxes,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
+import { ProjectAssetsPanel } from "@/components/project-assets-panel"
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -49,12 +50,14 @@ import {
   getActiveProject,
   getActiveWorkflowStep,
   getDefaultTextProvider,
+  getStoredAssets,
   getStoredWorkflowDocument,
   addStoredReviewIssue,
   saveStoredWorkflowDocument,
   setActiveWorkflowStep,
   updateProjectWorkflow,
   type StudioProject,
+  type StudioAsset,
 } from "@/lib/local-store"
 
 const stepIcon: Record<WorkflowStatus, typeof CheckCircle2> = {
@@ -137,6 +140,35 @@ function getStepProjectStatus(stepKey: string): WorkflowStatus {
   return "in-progress"
 }
 
+function downloadMarkdown(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function safeFilename(value: string) {
+  return value.replace(/[\\/:*?"<>|]/g, "") || "wufang-project"
+}
+
+function formatAssetList(assets: StudioAsset[]) {
+  if (!assets.length) return "暂无登记素材。"
+  return assets
+    .map((asset) => `- ${asset.name}（${asset.category}，${formatBytes(asset.size)}，${asset.addedAt}）`)
+    .join("\n")
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
 export default function WorkspacePage() {
   const [activeStep, setActiveStep] = useState("proposal")
   const [preview, setPreview] = useState(false)
@@ -189,11 +221,12 @@ export default function WorkspacePage() {
     setGenerating(true)
     try {
       const provider = getDefaultTextProvider()
+      const assets = getStoredAssets(project.id)
       const step = current ? { key: current.key, label: current.label } : { key: activeStep, label: activeStep }
       const response = await fetch("/api/generate/proposal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project, provider, step }),
+        body: JSON.stringify({ project, provider, step, assets }),
       })
 
       const data = await response.json()
@@ -222,16 +255,40 @@ export default function WorkspacePage() {
   const exportMarkdown = () => {
     if (!project) return
 
-    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement("a")
-    link.href = url
-    link.download = `${project.name.replace(/[\\/:*?"<>|]/g, "") || "wufang-project"}-${current?.label ?? "工作文档"}.md`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
+    downloadMarkdown(`${safeFilename(project.name)}-${current?.label ?? "工作文档"}.md`, content)
     toast.success("已导出当前文档")
+  }
+
+  const exportPackage = () => {
+    if (!project) return
+
+    const assets = getStoredAssets(project.id)
+    const sections = workflowSteps.map((step) => {
+      const document = getStoredWorkflowDocument(project.id, step.key, getStepFallback(project, step.key))
+      return `## ${step.label}\n\n${document}`
+    })
+    const markdown = `# ${project.name} 项目资料包
+
+## 项目规格
+- 项目类型：${project.type}
+- 平台：${project.platform}
+- 画幅：${project.aspect}
+- 集数：${project.episodes}
+- 单集时长：${project.duration}
+- 当前阶段：${project.currentStep}
+- 当前状态：${project.status}
+- 更新时间：${project.updatedAt}
+
+## 素材清单
+${formatAssetList(assets)}
+
+${sections.join("\n\n---\n\n")}
+`
+
+    downloadMarkdown(`${safeFilename(project.name)}-项目资料包.md`, markdown)
+    const nextProject = updateProjectWorkflow(project.id, "导出", 100, "passed")
+    if (nextProject) setProject(nextProject)
+    toast.success("已导出项目资料包")
   }
 
   const submitReview = () => {
@@ -390,11 +447,19 @@ export default function WorkspacePage() {
             <Button
               variant="outline"
               size="sm"
-              className="ml-auto"
               onClick={exportMarkdown}
             >
               <Download data-icon="inline-start" />
               导出
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              onClick={exportPackage}
+            >
+              <PackageOpen data-icon="inline-start" />
+              资料包
             </Button>
           </div>
         </Card>
@@ -454,22 +519,7 @@ export default function WorkspacePage() {
                 </CardContent>
               </Card>
 
-              <Card className="gap-3 py-4">
-                <CardHeader className="px-4">
-                  <CardTitle className="text-sm">相关文件</CardTitle>
-                </CardHeader>
-                <CardContent className="grid gap-1 px-4">
-                  {["世界观设定集.md", "人物小传.md", "EP01 剧本.md"].map((f) => (
-                    <button
-                      key={f}
-                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
-                    >
-                      <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="truncate">{f}</span>
-                    </button>
-                  ))}
-                </CardContent>
-              </Card>
+              {project && <ProjectAssetsPanel projectId={project.id} compact />}
 
               <Card className="gap-3 border-primary/30 bg-primary/5 py-4">
                 <CardHeader className="px-4">

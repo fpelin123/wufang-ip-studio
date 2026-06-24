@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 
 import { PageHeader } from "@/components/page-header"
+import { ProjectAssetsPanel } from "@/components/project-assets-panel"
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -167,6 +168,8 @@ export default function ProjectDetailPage() {
               </ScrollArea>
             </CardContent>
           </Card>
+
+          <ProjectAssetsPanel projectId={project.id} />
         </div>
 
         <div className="flex flex-col gap-4">
