@@ -30,7 +30,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { getStoredProjects, setActiveProjectId, type StudioProject } from "@/lib/local-store"
+import { getStoredProjects, type StudioProject } from "@/lib/local-store"
 
 export default function ProjectsPage() {
   const [query, setQuery] = useState("")
@@ -38,7 +38,14 @@ export default function ProjectsPage() {
   const [list, setList] = useState<StudioProject[]>([])
 
   useEffect(() => {
-    setList(getStoredProjects())
+    const refresh = () => setList(getStoredProjects())
+    refresh()
+    window.addEventListener("wufang:projects-change", refresh)
+    window.addEventListener("storage", refresh)
+    return () => {
+      window.removeEventListener("wufang:projects-change", refresh)
+      window.removeEventListener("storage", refresh)
+    }
   }, [])
 
   const filtered = list.filter((p) => {
@@ -66,7 +73,7 @@ export default function ProjectsPage() {
             onChange={(e) => setQuery(e.target.value)}
           />
         </InputGroup>
-        <Select value={type} onValueChange={(v) => setType(v as string)}>
+        <Select value={type} onValueChange={(value) => value && setType(value)}>
           <SelectTrigger className="sm:w-40">
             <SlidersHorizontal className="size-4 text-muted-foreground" />
             <SelectValue />
@@ -102,11 +109,17 @@ export default function ProjectsPage() {
             </TableHeader>
             <TableBody>
               {filtered.map((p) => (
-                <TableRow key={p.id}>
+                <TableRow
+                  key={p.id}
+                  className="cursor-pointer"
+                  onClick={() => {
+                    window.location.href = `/projects/${p.id}`
+                  }}
+                >
                   <TableCell className="pl-6">
                     <Link
-                      href="/workspace"
-                      onClick={() => setActiveProjectId(p.id)}
+                      href={`/projects/${p.id}`}
+                      onClick={(event) => event.stopPropagation()}
                       className="font-medium hover:underline"
                     >
                       {p.name}

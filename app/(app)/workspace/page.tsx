@@ -47,9 +47,13 @@ import {
 } from "@/lib/data"
 import {
   getActiveProject,
+  getActiveWorkflowStep,
   getDefaultTextProvider,
-  getStoredDocument,
-  saveStoredDocument,
+  getStoredWorkflowDocument,
+  addStoredReviewIssue,
+  saveStoredWorkflowDocument,
+  setActiveWorkflowStep,
+  updateProjectWorkflow,
   type StudioProject,
 } from "@/lib/local-store"
 
@@ -101,6 +105,38 @@ const sampleDoc = `# 《千面》IP 策划案
 ## 五、商业化与平台适配
 画幅 9:16，单集 90s，符合红果短剧投流模型；前 3 集设置强钩子，第 6 集首个大反转，留存目标 ≥ 45%。`
 
+function getStepFallback(project: StudioProject, stepKey: string) {
+  const step = workflowSteps.find((item) => item.key === stepKey)
+  const title = step?.label ?? "工作文档"
+
+  if (stepKey === "proposal" && project.id === "qm") return sampleDoc
+
+  return `# ${project.name} ${title}
+
+## 工作目标
+围绕 ${project.platform} 平台、${project.aspect}、${project.episodes} 集、单集 ${project.duration} 的规格，完成「${title}」阶段文档。
+
+## 当前输入
+- 项目类型：${project.type}
+- 当前阶段：${project.currentStep}
+- 负责人：${project.owner}
+
+## 待生成内容
+点击下方“生成”按钮，系统会按当前阶段生成第一版内容。`
+}
+
+function getStepProgress(stepKey: string) {
+  const index = workflowSteps.findIndex((step) => step.key === stepKey)
+  if (index < 0) return 8
+  return Math.round(((index + 1) / workflowSteps.length) * 100)
+}
+
+function getStepProjectStatus(stepKey: string): WorkflowStatus {
+  if (stepKey === "review") return "pending-review"
+  if (stepKey === "export") return "passed"
+  return "in-progress"
+}
+
 export default function WorkspacePage() {
   const [activeStep, setActiveStep] = useState("proposal")
   const [preview, setPreview] = useState(false)
@@ -113,8 +149,10 @@ export default function WorkspacePage() {
   useEffect(() => {
     const loadActiveProject = () => {
       const activeProject = getActiveProject()
+      const step = getActiveWorkflowStep()
       setProject(activeProject)
-      setContent(getStoredDocument(activeProject.id, sampleDoc))
+      setActiveStep(step)
+      setContent(getStoredWorkflowDocument(activeProject.id, step, getStepFallback(activeProject, step)))
     }
 
     loadActiveProject()
@@ -126,7 +164,23 @@ export default function WorkspacePage() {
 
   const updateContent = (value: string) => {
     setContent(value)
-    if (project) saveStoredDocument(project.id, value)
+    if (project) saveStoredWorkflowDocument(project.id, activeStep, value)
+  }
+
+  const changeStep = (step: string) => {
+    const workflowStep = workflowSteps.find((item) => item.key === step)
+    setActiveStep(step)
+    setActiveWorkflowStep(step)
+    if (project) {
+      const nextProject = updateProjectWorkflow(
+        project.id,
+        workflowStep?.label ?? project.currentStep,
+        getStepProgress(step),
+        getStepProjectStatus(step),
+      )
+      if (nextProject) setProject(nextProject)
+      setContent(getStoredWorkflowDocument(project.id, step, getStepFallback(project, step)))
+    }
   }
 
   const generateProposal = async () => {
@@ -135,17 +189,25 @@ export default function WorkspacePage() {
     setGenerating(true)
     try {
       const provider = getDefaultTextProvider()
+      const step = current ? { key: current.key, label: current.label } : { key: activeStep, label: activeStep }
       const response = await fetch("/api/generate/proposal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project, provider }),
+        body: JSON.stringify({ project, provider, step }),
       })
 
       const data = await response.json()
       if (!response.ok) throw new Error(data?.error ?? "生成失败")
 
       updateContent(data.content)
-      toast.success(data.source === "model" ? "策划案已由模型生成" : "已生成本地模板策划案", {
+      const nextProject = updateProjectWorkflow(
+        project.id,
+        step.label,
+        getStepProgress(step.key),
+        getStepProjectStatus(step.key),
+      )
+      if (nextProject) setProject(nextProject)
+      toast.success(data.source === "model" ? `${step.label}已由模型生成` : `已生成本地模板${step.label}`, {
         description: data.source === "model" ? provider?.textModel : "未配置API Key，使用本地模板。",
       })
     } catch (error) {
@@ -164,12 +226,42 @@ export default function WorkspacePage() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement("a")
     link.href = url
-    link.download = `${project.name.replace(/[\\/:*?"<>|]/g, "") || "wufang-project"}-策划案.md`
+    link.download = `${project.name.replace(/[\\/:*?"<>|]/g, "") || "wufang-project"}-${current?.label ?? "工作文档"}.md`
     document.body.appendChild(link)
     link.click()
     link.remove()
     URL.revokeObjectURL(url)
     toast.success("已导出当前文档")
+  }
+
+  const submitReview = () => {
+    if (!project || !current) return
+
+    const issue = addStoredReviewIssue({
+      id: `R-${Date.now().toString().slice(-6)}`,
+      project: project.name,
+      projectId: project.id,
+      location: `${current.label} · 当前文档`,
+      severity: current.key === "review" ? "P1" : "P2",
+      type: current.key === "storyboard" ? "时长" : "格式",
+      summary:
+        current.key === "storyboard"
+          ? "请检查分镜单块时长是否控制在 4-15 秒，并补齐缺失镜头字段。"
+          : `已提交「${current.label}」阶段审核，请检查结构完整性、平台适配和对外表达风险。`,
+      status: "open",
+      reviewer: "审核组·系统",
+      createdAt: new Date().toLocaleString("zh-CN", { hour12: false }),
+    })
+
+    const nextProject = updateProjectWorkflow(
+      project.id,
+      "审核",
+      getStepProgress("review"),
+      "pending-review",
+    )
+    if (nextProject) setProject(nextProject)
+    changeStep("review")
+    toast.success("已提交审核", { description: `审核记录 ${issue.id} 已进入审核中心。` })
   }
 
   return (
@@ -200,7 +292,7 @@ export default function WorkspacePage() {
                   return (
                     <button
                       key={s.key}
-                      onClick={() => setActiveStep(s.key)}
+                      onClick={() => changeStep(s.key)}
                       className={cn(
                         "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
                         activeStep === s.key && "bg-accent font-medium",
@@ -290,7 +382,7 @@ export default function WorkspacePage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => toast.info("已提交审核")}
+              onClick={submitReview}
             >
               <ShieldCheck data-icon="inline-start" />
               审核

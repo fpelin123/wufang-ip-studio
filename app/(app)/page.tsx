@@ -1,4 +1,8 @@
+"use client"
+
+import { useEffect, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import {
   ArrowUpRight,
   ClipboardCheck,
@@ -32,18 +36,11 @@ import {
 } from "@/components/ui/table"
 import {
   exportHistory,
-  projects,
   statusLabels,
   tools,
   type WorkflowStatus,
 } from "@/lib/data"
-
-const summary: { label: string; key: WorkflowStatus; count: number }[] = [
-  { label: statusLabels["in-progress"], key: "in-progress", count: 14 },
-  { label: statusLabels["pending-review"], key: "pending-review", count: 5 },
-  { label: statusLabels["needs-revision"], key: "needs-revision", count: 3 },
-  { label: statusLabels["passed"], key: "passed", count: 22 },
-]
+import { getStoredProjects, type StudioProject } from "@/lib/local-store"
 
 const pendingReviews = [
   { project: "《凿天》", stage: "剧本", owner: "周慕白", time: "2 小时前" },
@@ -54,6 +51,45 @@ const pendingReviews = [
 const quickTools = tools.slice(0, 4)
 
 export default function DashboardPage() {
+  const router = useRouter()
+  const [projects, setProjects] = useState<StudioProject[]>([])
+
+  useEffect(() => {
+    const refresh = () => setProjects(getStoredProjects())
+    refresh()
+    window.addEventListener("wufang:active-project-change", refresh)
+    window.addEventListener("wufang:projects-change", refresh)
+    window.addEventListener("storage", refresh)
+    return () => {
+      window.removeEventListener("wufang:active-project-change", refresh)
+      window.removeEventListener("wufang:projects-change", refresh)
+      window.removeEventListener("storage", refresh)
+    }
+  }, [])
+
+  const summary: { label: string; key: WorkflowStatus; count: number }[] = [
+    {
+      label: statusLabels["in-progress"],
+      key: "in-progress",
+      count: projects.filter((project) => project.status === "in-progress").length,
+    },
+    {
+      label: statusLabels["pending-review"],
+      key: "pending-review",
+      count: projects.filter((project) => project.status === "pending-review").length,
+    },
+    {
+      label: statusLabels["needs-revision"],
+      key: "needs-revision",
+      count: projects.filter((project) => project.status === "needs-revision").length,
+    },
+    {
+      label: statusLabels["passed"],
+      key: "passed",
+      count: projects.filter((project) => project.status === "passed").length,
+    },
+  ]
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -107,11 +143,16 @@ export default function DashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {projects.map((p) => (
-                  <TableRow key={p.id}>
+                {projects.slice(0, 5).map((p) => (
+                  <TableRow
+                    key={p.id}
+                    className="cursor-pointer"
+                    onClick={() => router.push(`/projects/${p.id}`)}
+                  >
                     <TableCell className="pl-6">
                       <Link
-                        href="/workspace"
+                        href={`/projects/${p.id}`}
+                        onClick={(event) => event.stopPropagation()}
                         className="font-medium hover:underline"
                       >
                         {p.name}

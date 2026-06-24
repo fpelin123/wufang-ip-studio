@@ -1,6 +1,13 @@
 "use client"
 
-import { providers, type Project, type Provider } from "@/lib/data"
+import {
+  providers,
+  reviewIssues,
+  type Project,
+  type Provider,
+  type ReviewIssue,
+  type WorkflowStatus,
+} from "@/lib/data"
 
 export type StudioProject = Project & {
   deliverables: string[]
@@ -14,11 +21,19 @@ export type StudioProvider = Provider & {
   timeoutMs?: number
 }
 
+export type StudioReviewIssue = ReviewIssue & {
+  projectId?: string
+  createdAt?: string
+}
+
 const keys = {
   projects: "wufang.projects",
   providers: "wufang.providers",
   activeProjectId: "wufang.activeProjectId",
+  activeWorkflowStep: "wufang.activeWorkflowStep",
   documentPrefix: "wufang.document.",
+  workflowDocumentPrefix: "wufang.workflowDocument.",
+  reviewIssues: "wufang.reviewIssues",
 }
 
 export const projectTypes = ["AI漫剧", "微短剧", "IP样片", "文旅方案", "AIGC培训", "自定义"]
@@ -95,6 +110,30 @@ export function upsertStoredProject(project: StudioProject) {
   setActiveProjectId(project.id)
 }
 
+export function updateStoredProject(id: string, patch: Partial<StudioProject>) {
+  const existing = getStoredProjects()
+  const next = existing.map((project) =>
+    project.id === id ? { ...project, ...patch } : project,
+  )
+  saveStoredProjects(next)
+  window.dispatchEvent(new CustomEvent("wufang:projects-change", { detail: id }))
+  return next.find((project) => project.id === id)
+}
+
+export function updateProjectWorkflow(
+  id: string,
+  stepLabel: string,
+  progress: number,
+  status: WorkflowStatus = "in-progress",
+) {
+  return updateStoredProject(id, {
+    currentStep: stepLabel,
+    progress: Math.max(0, Math.min(100, Math.round(progress))),
+    status,
+    updatedAt: new Date().toLocaleString("zh-CN", { hour12: false }),
+  })
+}
+
 export function getActiveProjectId() {
   if (typeof window === "undefined") return defaultProjects[0].id
   return window.localStorage.getItem(keys.activeProjectId) ?? getStoredProjects()[0]?.id ?? defaultProjects[0].id
@@ -110,6 +149,16 @@ export function getActiveProject() {
   const projects = getStoredProjects()
   const activeId = getActiveProjectId()
   return projects.find((project) => project.id === activeId) ?? projects[0] ?? defaultProjects[0]
+}
+
+export function getActiveWorkflowStep() {
+  if (typeof window === "undefined") return "proposal"
+  return window.localStorage.getItem(keys.activeWorkflowStep) ?? "proposal"
+}
+
+export function setActiveWorkflowStep(step: string) {
+  if (typeof window === "undefined") return
+  window.localStorage.setItem(keys.activeWorkflowStep, step)
 }
 
 export function getStoredProviders(): StudioProvider[] {
@@ -130,6 +179,44 @@ export function getStoredDocument(projectId: string, fallback: string) {
 
 export function saveStoredDocument(projectId: string, content: string) {
   writeJson(`${keys.documentPrefix}${projectId}`, content)
+}
+
+function getWorkflowDocumentKey(projectId: string, step: string) {
+  return `${keys.workflowDocumentPrefix}${projectId}.${step}`
+}
+
+export function getStoredWorkflowDocument(projectId: string, step: string, fallback: string) {
+  const legacyFallback = step === "proposal" ? getStoredDocument(projectId, fallback) : fallback
+  return readJson<string>(getWorkflowDocumentKey(projectId, step), legacyFallback)
+}
+
+export function saveStoredWorkflowDocument(projectId: string, step: string, content: string) {
+  writeJson(getWorkflowDocumentKey(projectId, step), content)
+  if (step === "proposal") saveStoredDocument(projectId, content)
+}
+
+export function getStoredReviewIssues(): StudioReviewIssue[] {
+  return readJson<StudioReviewIssue[]>(keys.reviewIssues, reviewIssues)
+}
+
+export function saveStoredReviewIssues(value: StudioReviewIssue[]) {
+  writeJson(keys.reviewIssues, value)
+}
+
+export function addStoredReviewIssue(issue: StudioReviewIssue) {
+  const existing = getStoredReviewIssues()
+  const next = [issue, ...existing.filter((item) => item.id !== issue.id)]
+  saveStoredReviewIssues(next)
+  window.dispatchEvent(new CustomEvent("wufang:review-issues-change", { detail: issue.id }))
+  return issue
+}
+
+export function updateStoredReviewIssue(id: string, patch: Partial<StudioReviewIssue>) {
+  const next = getStoredReviewIssues().map((issue) =>
+    issue.id === id ? { ...issue, ...patch } : issue,
+  )
+  saveStoredReviewIssues(next)
+  window.dispatchEvent(new CustomEvent("wufang:review-issues-change", { detail: id }))
 }
 
 export function createProjectId(name: string) {

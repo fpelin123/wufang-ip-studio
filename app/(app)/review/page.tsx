@@ -1,24 +1,28 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { PageHeader } from "@/components/page-header"
-import { reviewIssues, type ReviewIssue } from "@/lib/data"
 import { cn } from "@/lib/utils"
 import { CircleAlert, CircleDot, CircleCheck, ListChecks } from "lucide-react"
 import { toast } from "sonner"
+import {
+  getStoredReviewIssues,
+  updateStoredReviewIssue,
+  type StudioReviewIssue,
+} from "@/lib/local-store"
 
-const severityStyles: Record<ReviewIssue["severity"], string> = {
+const severityStyles: Record<StudioReviewIssue["severity"], string> = {
   P0: "bg-destructive/10 text-destructive border-destructive/30",
   P1: "bg-amber-500/10 text-amber-700 border-amber-500/30",
   P2: "bg-muted text-muted-foreground border-border",
 }
 
-const statusMeta: Record<ReviewIssue["status"], { label: string; icon: typeof CircleDot; cls: string }> = {
+const statusMeta: Record<StudioReviewIssue["status"], { label: string; icon: typeof CircleDot; cls: string }> = {
   open: { label: "待处理", icon: CircleAlert, cls: "text-destructive" },
   fixing: { label: "返修中", icon: CircleDot, cls: "text-amber-600" },
   resolved: { label: "已解决", icon: CircleCheck, cls: "text-emerald-600" },
@@ -33,13 +37,32 @@ const filters = [
 
 export default function ReviewPage() {
   const [filter, setFilter] = useState("all")
-  const list = reviewIssues.filter((i) => filter === "all" || i.status === filter)
+  const [issues, setIssues] = useState<StudioReviewIssue[]>([])
+
+  useEffect(() => {
+    const refresh = () => setIssues(getStoredReviewIssues())
+    refresh()
+    window.addEventListener("wufang:review-issues-change", refresh)
+    window.addEventListener("storage", refresh)
+    return () => {
+      window.removeEventListener("wufang:review-issues-change", refresh)
+      window.removeEventListener("storage", refresh)
+    }
+  }, [])
+
+  const markResolved = (id: string) => {
+    updateStoredReviewIssue(id, { status: "resolved" })
+    setIssues(getStoredReviewIssues())
+    toast.success(`已将 ${id} 标记为已解决`)
+  }
+
+  const list = issues.filter((i) => filter === "all" || i.status === filter)
 
   const counts = {
-    p0: reviewIssues.filter((i) => i.severity === "P0").length,
-    open: reviewIssues.filter((i) => i.status === "open").length,
-    fixing: reviewIssues.filter((i) => i.status === "fixing").length,
-    resolved: reviewIssues.filter((i) => i.status === "resolved").length,
+    p0: issues.filter((i) => i.severity === "P0").length,
+    open: issues.filter((i) => i.status === "open").length,
+    fixing: issues.filter((i) => i.status === "fixing").length,
+    resolved: issues.filter((i) => i.status === "resolved").length,
   }
 
   return (
@@ -113,7 +136,7 @@ export default function ReviewPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => toast.success(`已将 ${issue.id} 标记为已解决`)}
+                      onClick={() => markResolved(issue.id)}
                     >
                       标记解决
                     </Button>

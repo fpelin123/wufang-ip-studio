@@ -45,9 +45,11 @@ export function TopBar() {
 
     refresh()
     window.addEventListener("wufang:active-project-change", refresh)
+    window.addEventListener("wufang:projects-change", refresh)
     window.addEventListener("storage", refresh)
     return () => {
       window.removeEventListener("wufang:active-project-change", refresh)
+      window.removeEventListener("wufang:projects-change", refresh)
       window.removeEventListener("storage", refresh)
     }
   }, [])
