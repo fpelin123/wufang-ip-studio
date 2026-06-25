@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useEffect, useMemo, useState } from "react"
 import {
@@ -28,8 +28,10 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { tools, workflowSteps } from "@/lib/data"
+import { generateDocument } from "@/lib/generation"
 import { fetchStudioSnapshot, getAssetsFromSnapshot, getWorkflowDocumentFromSnapshot } from "@/lib/studio-snapshot"
 import { getDefaultTextProvider, saveToolOutputToProject, type StudioProject } from "@/lib/local-store"
+import { toolDefaultInput, toolWriteBackMap, type ToolId } from "@/lib/tool-config"
 
 const iconMap: Record<string, typeof FileText> = {
   "proposal-gen": FileText,
@@ -53,34 +55,18 @@ const categoryVariant: Record<string, "default" | "secondary" | "outline"> = {
   导出: "secondary",
 }
 
-const writeBackMap: Record<string, { step: string; label: string; progress: number; status: "in-progress" | "pending-review" | "passed" }> = {
-  "proposal-gen": { step: "proposal", label: "策划案", progress: 18, status: "in-progress" },
-  "script-review": { step: "review", label: "审核", progress: 90, status: "pending-review" },
-  "script-deai": { step: "script", label: "剧本", progress: 35, status: "in-progress" },
-  "script-to-director": { step: "director", label: "导演讲戏", progress: 55, status: "in-progress" },
-  "director-to-storyboard": { step: "storyboard", label: "分镜", progress: 70, status: "in-progress" },
-  "seedance-prompt": { step: "visual", label: "视觉开发", progress: 75, status: "in-progress" },
-  "identity-lock": { step: "visual", label: "视觉开发", progress: 72, status: "in-progress" },
-  "image-prompt": { step: "prompt", label: "出图提示词", progress: 78, status: "in-progress" },
-  "platform-check": { step: "review", label: "审核", progress: 88, status: "pending-review" },
-  "deai-check": { step: "review", label: "审核", progress: 90, status: "pending-review" },
-  "package-export": { step: "export", label: "导出", progress: 100, status: "passed" },
-}
-
-type ToolId = (typeof tools)[number]["id"]
-
 export default function ToolsPage() {
   const [projects, setProjects] = useState<StudioProject[]>([])
   const [selectedId, setSelectedId] = useState<ToolId>("proposal-gen")
   const [projectId, setProjectId] = useState("")
-  const [inputText, setInputText] = useState("当前项目参考资料、角色设定、分镜草稿。")
+  const [inputText, setInputText] = useState(toolDefaultInput["proposal-gen"])
   const [result, setResult] = useState("")
   const [running, setRunning] = useState(false)
   const [snapshotReady, setSnapshotReady] = useState(false)
 
   const selected = useMemo(() => tools.find((item) => item.id === selectedId) ?? tools[0], [selectedId])
   const SelectedIcon = iconMap[selected.id] ?? FileText
-  const target = writeBackMap[selected.id] ?? writeBackMap["proposal-gen"]
+  const target = toolWriteBackMap[selected.id]
   const activeProject = useMemo(() => projects.find((item) => item.id === projectId) ?? projects[0] ?? null, [projects, projectId])
 
   useEffect(() => {
@@ -89,11 +75,15 @@ export default function ToolsPage() {
       const first = snapshot.projects[0]
       if (first) {
         setProjectId(first.id)
-        setInputText(first.referenceFiles?.length ? first.referenceFiles.join("、") : first.name)
+        setInputText(first.referenceFiles?.length ? first.referenceFiles.join("、") : toolDefaultInput["proposal-gen"])
       }
       setSnapshotReady(true)
     })
   }, [])
+
+  useEffect(() => {
+    setInputText(toolDefaultInput[selected.id as ToolId] ?? toolDefaultInput["proposal-gen"])
+  }, [selected.id])
 
   const runTool = async () => {
     if (!activeProject) {
@@ -104,28 +94,30 @@ export default function ToolsPage() {
     try {
       const provider = getDefaultTextProvider()
       const snapshot = await fetchStudioSnapshot()
-      const assets = activeProject ? getAssetsFromSnapshot(snapshot, activeProject.id) : []
-      const workflowDocument = activeProject ? getWorkflowDocumentFromSnapshot(snapshot, activeProject.id, target.step) ?? "" : ""
-      const response = await fetch("/api/generate/proposal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project: activeProject,
-          provider,
-          step: { key: target.step, label: target.label },
-          assets: assets.map((asset) => ({
-            name: asset.name,
-            category: asset.category,
-            size: asset.size,
-            addedAt: asset.addedAt,
-          })),
-        }),
+      const assets = getAssetsFromSnapshot(snapshot, activeProject.id)
+      const workflowDocument = getWorkflowDocumentFromSnapshot(snapshot, activeProject.id, target.step) ?? ""
+      const response = await generateDocument({
+        project: activeProject,
+        provider: provider
+          ? {
+              baseUrl: provider.baseUrl,
+              apiKey: provider.apiKey,
+              textModel: provider.textModel,
+              temperature: provider.temperature,
+              maxTokens: provider.maxTokens,
+            }
+          : undefined,
+        step: { key: target.step, label: target.label },
+        assets: assets.map((asset) => ({
+          name: asset.name,
+          category: asset.category,
+          size: asset.size,
+          addedAt: asset.addedAt,
+        })),
       })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data?.error ?? "生成失败")
-      const merged = [workflowDocument, data.content ?? ""].filter(Boolean).join("\n\n")
+      const merged = [workflowDocument, response.content].filter(Boolean).join("\n\n")
       setResult(merged)
-      toast.success(data.source === "model" ? "已由模型生成" : "已生成本地模板")
+      toast.success(response.source === "model" ? "已由模型生成" : "已生成本地模板")
     } catch (error) {
       toast.error("运行失败", { description: error instanceof Error ? error.message : "请检查模型配置" })
     } finally {
@@ -147,6 +139,18 @@ export default function ToolsPage() {
       status: target.status,
     })
     toast.success("已写回项目")
+  }
+
+  const exportResult = () => {
+    if (!result) return
+    const blob = new Blob([result], { type: "text/markdown;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${activeProject?.name ?? "wufang"}-${target.label}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success("已导出文档")
   }
 
   return (
@@ -231,6 +235,10 @@ export default function ToolsPage() {
                 <Copy data-icon="inline-start" />
                 复制结果
               </Button>
+              <Button variant="outline" onClick={exportResult} disabled={!result}>
+                <PackageOpen data-icon="inline-start" />
+                导出
+              </Button>
             </div>
 
             <div className="grid gap-2">
@@ -257,3 +265,4 @@ function Field({ label, value }: { label: string; value: string }) {
     </div>
   )
 }
+
