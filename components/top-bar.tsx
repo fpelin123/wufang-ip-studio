@@ -123,14 +123,16 @@ export function TopBar() {
             }
           />
           <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuLabel>
-              <div className="grid leading-tight">
-                <span className="text-sm font-medium text-foreground">Wufang IP Studio</span>
-                <span className="text-xs font-normal">
-                  {getCurrentUserId() || "未登录"} · {roleLabels[getCurrentUserRole()]}
-                </span>
-              </div>
-            </DropdownMenuLabel>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>
+                <div className="grid leading-tight">
+                  <span className="text-sm font-medium text-foreground">Wufang IP Studio</span>
+                  <span className="text-xs font-normal">
+                    {getCurrentUserId() || "未登录"} · {roleLabels[getCurrentUserRole()]}
+                  </span>
+                </div>
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem onClick={() => router.push("/login")}>
@@ -159,3 +161,4 @@ export function TopBar() {
     </header>
   )
 }
+
