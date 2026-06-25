@@ -48,7 +48,7 @@ export async function POST(request: Request) {
             ? "video"
             : file.type.startsWith("audio/")
               ? "audio"
-          : "document",
+              : "document",
         addedAt: now,
         filePath,
       }
@@ -68,3 +68,4 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: true, assets })
 }
+

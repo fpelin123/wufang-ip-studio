@@ -18,12 +18,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { qualityGates, workflowSteps, type QualityGate } from "@/lib/data"
-import {
-  updateStoredProject,
-  setActiveProjectId,
-  setActiveWorkflowStep,
-  type StudioProject,
-} from "@/lib/local-store"
+import { updateStoredProject, setActiveProjectId, setActiveWorkflowStep, type StudioProject } from "@/lib/local-store"
 import { fetchStudioSnapshot, getProjectFromSnapshot, getWorkflowDocumentFromSnapshot } from "@/lib/studio-snapshot"
 import { canEditContent, getCurrentUserId, getCurrentUserRole, getCurrentUserName } from "@/lib/team"
 import { acquireProjectLock, fetchProjectLock, releaseProjectLock, type ProjectLock } from "@/lib/project-lock"
@@ -97,9 +92,7 @@ export default function ProjectDetailPage() {
 
     return () => {
       controller.abort()
-      if (project?.id) {
-        void releaseProjectLock(project.id)
-      }
+      if (project?.id) void releaseProjectLock(project.id)
     }
   }, [params.id])
 
@@ -110,14 +103,12 @@ export default function ProjectDetailPage() {
     const claim = async () => {
       const result = await acquireProjectLock(project.id)
       if (!active) return
-      if (result.acquired) {
-        setLock(result.lock)
-        return
-      }
       setLock(result.lock)
-      toast.message("当前项目已被占用", {
-        description: result.lock ? `${result.lock.userName} 正在编辑，当前仅可查看和下载。` : "当前仅可查看和下载。",
-      })
+      if (!result.acquired) {
+        toast.message("当前项目已被占用", {
+          description: result.lock ? `${result.lock.userName} 正在编辑，你只能查看和下载。` : "你只能查看和下载。",
+        })
+      }
     }
 
     void claim()
@@ -190,7 +181,7 @@ export default function ProjectDetailPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title={project.name}
-        description={`${project.type} · ${project.platform} · ${project.aspect} · ${project.episodes} 集 · ${project.duration}`}
+        description={`${project.type} · ${project.platform} · ${project.aspect} · ${project.episodes}集 · ${project.duration}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <ProjectAccessChip editable={canEdit} />
@@ -200,7 +191,7 @@ export default function ProjectDetailPage() {
             </Button>
             <Button variant="outline" onClick={saveProject} disabled={saving || !canEdit}>
               <Save data-icon="inline-start" />
-              {saving ? "保存中" : "保存修改"}
+              {saving ? "保存中..." : "保存修改"}
             </Button>
             <Button onClick={() => enterWorkspace()} disabled={canEditByRole && isLockedByOther}>
               <Play data-icon="inline-start" />
@@ -218,33 +209,22 @@ export default function ProjectDetailPage() {
                 <Settings2 className="size-4 text-primary" />
                 项目概览
               </CardTitle>
-              <CardDescription>
-                {lockLoading
-                  ? "正在检查项目占用状态。"
-                  : isLockedByOther
-                    ? `${lock?.userName ?? "其他用户"} 正在编辑，当前仅可查看和下载。`
-                    : canEdit
-                      ? "当前可编辑。"
-                      : "当前身份仅可查看和下载。"}
-              </CardDescription>
+              <CardDescription>项目核心规格、当前阶段和最近编辑状态。</CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-5">
+            <CardContent className="grid gap-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <FieldInput label="项目名称" value={draft.name} onChange={(value) => setDraft((s) => ({ ...s, name: value }))} disabled={!canEdit} />
-                <FieldInput label="负责人" value={draft.owner} onChange={(value) => setDraft((s) => ({ ...s, owner: value }))} disabled={!canEdit} />
-                <FieldInput label="项目类型" value={draft.type} onChange={(value) => setDraft((s) => ({ ...s, type: value }))} disabled={!canEdit} />
-                <FieldInput label="平台" value={draft.platform} onChange={(value) => setDraft((s) => ({ ...s, platform: value }))} disabled={!canEdit} />
-                <FieldInput label="画幅" value={draft.aspect} onChange={(value) => setDraft((s) => ({ ...s, aspect: value }))} disabled={!canEdit} />
-                <FieldInput label="单集时长" value={draft.duration} onChange={(value) => setDraft((s) => ({ ...s, duration: value }))} disabled={!canEdit} />
+                <Field label="项目名称" value={draft.name} onChange={(value) => setDraft((current) => ({ ...current, name: value }))} disabled={!canEdit} />
+                <Field label="负责人" value={draft.owner} onChange={(value) => setDraft((current) => ({ ...current, owner: value }))} disabled={!canEdit} />
+                <Field label="项目类型" value={draft.type} onChange={(value) => setDraft((current) => ({ ...current, type: value }))} disabled={!canEdit} />
+                <Field label="平台" value={draft.platform} onChange={(value) => setDraft((current) => ({ ...current, platform: value }))} disabled={!canEdit} />
+                <Field label="画幅" value={draft.aspect} onChange={(value) => setDraft((current) => ({ ...current, aspect: value }))} disabled={!canEdit} />
+                <Field label="集数" value={String(draft.episodes)} onChange={(value) => setDraft((current) => ({ ...current, episodes: Number(value) || current.episodes }))} disabled={!canEdit} />
               </div>
-              <div className="grid gap-2 sm:max-w-40">
-                <FieldInput label="集数" value={String(draft.episodes)} onChange={(value) => setDraft((s) => ({ ...s, episodes: Number(value) || 1 }))} disabled={!canEdit} />
-              </div>
-              <Separator />
               <div className="grid gap-2">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-sm font-medium">整体进度</span>
-                  <span className="text-sm tabular-nums text-muted-foreground">{project.progress}%</span>
+                <Field label="单集时长" value={draft.duration} onChange={(value) => setDraft((current) => ({ ...current, duration: value }))} disabled={!canEdit} />
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">当前阶段：{project.currentStep}</Badge>
+                  <Badge variant="outline">更新时间：{project.updatedAt}</Badge>
                 </div>
                 <Progress value={project.progress} className="h-2" />
               </div>
@@ -257,14 +237,13 @@ export default function ProjectDetailPage() {
                 <FileText className="size-4 text-primary" />
                 当前文档
               </CardTitle>
-              <CardDescription>当前阶段的最新内容预览。</CardDescription>
+              <CardDescription>可直接进入工作台继续编辑。</CardDescription>
             </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-72 rounded-md border bg-muted/20">
-                <pre className="whitespace-pre-wrap p-4 text-sm leading-relaxed text-foreground/90">
-                  {document}
-                </pre>
-              </ScrollArea>
+            <CardContent className="grid gap-3">
+              <div className="rounded-md border bg-muted/30 p-3 text-sm whitespace-pre-wrap">{document}</div>
+              <Button variant="outline" onClick={() => enterWorkspace()}>
+                打开工作台
+              </Button>
             </CardContent>
           </Card>
 
@@ -274,39 +253,23 @@ export default function ProjectDetailPage() {
         <div className="flex flex-col gap-4">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Boxes className="size-4 text-primary" />
-                交付件
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-1.5">
-              {project.deliverables.map((item) => (
-                <Badge key={item} variant="secondary" className="font-normal">
-                  {item}
-                </Badge>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
               <CardTitle className="text-base">工作流</CardTitle>
-              <CardDescription>建议继续处理：{nextStep.label}</CardDescription>
+              <CardDescription>项目阶段和生成文档的对应关系。</CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-1">
+            <CardContent className="grid gap-2">
               {workflowSteps.map((step, index) => (
                 <button
                   key={step.key}
                   type="button"
                   onClick={() => enterWorkspace(step.key)}
                   className={cn(
-                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
-                    step.label === project.currentStep && "bg-accent font-medium",
+                    "flex items-center gap-2 rounded-md border px-3 py-2 text-left hover:bg-accent/50",
+                    step.label === project.currentStep && "border-primary bg-primary/5",
                   )}
                 >
-                  <span className="w-5 text-xs tabular-nums text-muted-foreground">{index + 1}</span>
-                  <span className="flex-1">{step.label}</span>
+                  <span className="w-4 text-xs tabular-nums text-muted-foreground">{index + 1}</span>
                   <StatusBadge status={step.status} />
+                  <span className="text-sm">{step.label}</span>
                 </button>
               ))}
             </CardContent>
@@ -314,44 +277,28 @@ export default function ProjectDetailPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">质检规则</CardTitle>
+              <CardTitle className="text-base">质检门禁</CardTitle>
+              <CardDescription>当前项目的基础质量检查。</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-2">
               {qualityGates.map((gate) => {
                 const Icon = gateIcon[gate.status]
                 return (
-                  <div key={gate.label} className="flex items-center gap-2 text-sm">
-                    <Icon className={cn("size-4 shrink-0", gateColor[gate.status])} />
-                    <span>{gate.label}</span>
+                  <div key={gate.label} className="flex items-center gap-2 rounded-md border px-3 py-2">
+                    <Icon className={cn("size-4", gateColor[gate.status])} />
+                    <span className="text-sm">{gate.label}</span>
                   </div>
                 )
               })}
             </CardContent>
           </Card>
-
-          {lock && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">编辑状态</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm text-muted-foreground">
-                {lock.userId === currentUserId ? (
-                  <div>你正在编辑这个项目。</div>
-                ) : (
-                  <div>
-                    {lock.userName} 正在编辑，当前只能查看和下载。
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
         </div>
       </div>
     </div>
   )
 }
 
-function FieldInput({
+function Field({
   label,
   value,
   onChange,
@@ -364,8 +311,9 @@ function FieldInput({
 }) {
   return (
     <div className="grid gap-1.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-sm text-muted-foreground">{label}</span>
       <Input value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} />
     </div>
   )
 }
+

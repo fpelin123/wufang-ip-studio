@@ -20,14 +20,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  createProjectId,
-  defaultDeliverables,
-  platforms,
-  projectTypes,
-  upsertStoredProject,
-  type StudioProject,
-} from "@/lib/local-store"
+import { createProjectId, defaultDeliverables, platforms, projectTypes, upsertStoredProject, type StudioProject } from "@/lib/local-store"
 import { canEditContent, getCurrentUserRole } from "@/lib/team"
 
 export function NewProjectDialog({ trigger }: { trigger?: React.ReactNode }) {
@@ -36,7 +29,7 @@ export function NewProjectDialog({ trigger }: { trigger?: React.ReactNode }) {
   const [name, setName] = React.useState("")
   const [type, setType] = React.useState(projectTypes[0])
   const [platform, setPlatform] = React.useState(platforms[0])
-  const [aspect, setAspect] = React.useState("9:16 绔栖睆")
+  const [aspect, setAspect] = React.useState("9:16 竖屏")
   const [episodes, setEpisodes] = React.useState(60)
   const [duration, setDuration] = React.useState("90s")
 
@@ -90,17 +83,12 @@ export function NewProjectDialog({ trigger }: { trigger?: React.ReactNode }) {
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>新建项目</DialogTitle>
-          <DialogDescription>填写项目规格，创建后进入工作台。</DialogDescription>
+          <DialogDescription>填写项目规格，创建后直接进入工作台。</DialogDescription>
         </DialogHeader>
         <FieldGroup>
           <Field>
             <FieldLabel htmlFor="np-name">项目名称</FieldLabel>
-            <Input
-              id="np-name"
-              placeholder="例如：千面 IP"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
+            <Input id="np-name" placeholder="例如：千面 IP" value={name} onChange={(event) => setName(event.target.value)} />
           </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field>
@@ -155,22 +143,11 @@ export function NewProjectDialog({ trigger }: { trigger?: React.ReactNode }) {
           <div className="grid grid-cols-2 gap-4">
             <Field>
               <FieldLabel htmlFor="np-ep">集数</FieldLabel>
-              <Input
-                id="np-ep"
-                type="number"
-                min={1}
-                value={episodes}
-                onChange={(event) => setEpisodes(Number(event.target.value) || 1)}
-              />
+              <Input id="np-ep" type="number" min={1} value={episodes} onChange={(event) => setEpisodes(Number(event.target.value) || 1)} />
             </Field>
             <Field>
               <FieldLabel htmlFor="np-dur">单集时长</FieldLabel>
-              <Input
-                id="np-dur"
-                placeholder="例如：90s"
-                value={duration}
-                onChange={(event) => setDuration(event.target.value)}
-              />
+              <Input id="np-dur" placeholder="例如：90s" value={duration} onChange={(event) => setDuration(event.target.value)} />
             </Field>
           </div>
         </FieldGroup>
@@ -184,3 +161,4 @@ export function NewProjectDialog({ trigger }: { trigger?: React.ReactNode }) {
     </Dialog>
   )
 }
+

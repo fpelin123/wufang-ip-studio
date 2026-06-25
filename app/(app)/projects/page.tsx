@@ -11,26 +11,9 @@ import { StatusBadge } from "@/components/status-badge"
 import { NewProjectDialog } from "@/components/new-project-dialog"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { type StudioProject } from "@/lib/local-store"
 import { fetchStudioSnapshot } from "@/lib/studio-snapshot"
 import { canEditContent, getCurrentUserId, getCurrentUserRole } from "@/lib/team"
@@ -95,22 +78,14 @@ export default function ProjectsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title="项目管理"
-        description="管理所有 IP 生产项目及其工作流状态。"
-        actions={<NewProjectDialog />}
-      />
+      <PageHeader title="项目管理" description="管理所有 IP 生产项目和它们的工作流状态。" actions={<NewProjectDialog />} />
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <InputGroup className="sm:max-w-xs">
           <InputGroupAddon>
             <Search />
           </InputGroupAddon>
-          <InputGroupInput
-            placeholder="搜索项目名称或负责人"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <InputGroupInput placeholder="搜索项目名称或负责人" value={query} onChange={(e) => setQuery(e.target.value)} />
         </InputGroup>
         <Select value={type} onValueChange={(value) => value && setType(value)}>
           <SelectTrigger className="sm:w-40">
@@ -150,11 +125,7 @@ export default function ProjectsPage() {
                 const access = getAccessState(p.id)
                 const lock = locks[p.id]
                 return (
-                  <TableRow
-                    key={p.id}
-                    className="cursor-pointer"
-                    onClick={() => router.push(`/projects/${p.id}`)}
-                  >
+                  <TableRow key={p.id} className="cursor-pointer" onClick={() => router.push(`/projects/${p.id}`)}>
                     <TableCell className="pl-6">
                       <div className="flex items-center gap-2">
                         <Link href={`/projects/${p.id}`} className="font-medium hover:underline">
@@ -189,7 +160,10 @@ export default function ProjectsPage() {
                     <TableCell>
                       <StatusBadge status={p.status} />
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{access.detail}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      <div>{access.label}</div>
+                      <div>{access.detail}</div>
+                    </TableCell>
                     <TableCell className="pr-6 text-right text-xs text-muted-foreground">{p.updatedAt}</TableCell>
                   </TableRow>
                 )
@@ -201,3 +175,4 @@ export default function ProjectsPage() {
     </div>
   )
 }
+
