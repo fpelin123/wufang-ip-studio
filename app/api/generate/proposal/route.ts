@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { getSessionFromCookieHeader } from "@/lib/session"
 
 type GenerateRequest = {
   project: {
@@ -177,6 +178,11 @@ ${assetSection}
 }
 
 export async function POST(request: Request) {
+  const role = getSessionFromCookieHeader(request.headers.get("cookie")).role || "viewer"
+  if (role !== "admin" && role !== "editor") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 })
+  }
+
   const body = (await request.json()) as GenerateRequest
   const { project, provider, step, assets } = body
 

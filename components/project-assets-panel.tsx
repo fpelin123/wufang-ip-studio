@@ -7,13 +7,12 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  addStoredAssets,
-  getStoredAssets,
-  removeStoredAsset,
-  type StudioAsset,
-} from "@/lib/local-store"
 import { cn } from "@/lib/utils"
+import { fetchStudioSnapshot, getAssetsFromSnapshot } from "@/lib/studio-snapshot"
+import type { StudioAsset } from "@/lib/local-store"
+import { canEditContent, getCurrentUserRole, getCurrentSessionHeaders } from "@/lib/team"
+
+type StoredAsset = StudioAsset & { filePath?: string }
 
 const assetIcon = {
   document: FileText,
@@ -23,7 +22,7 @@ const assetIcon = {
   other: Paperclip,
 }
 
-const categoryLabel: Record<StudioAsset["category"], string> = {
+const categoryLabel: Record<StoredAsset["category"], string> = {
   document: "文档",
   image: "图片",
   video: "视频",
@@ -39,35 +38,72 @@ export function ProjectAssetsPanel({
   compact?: boolean
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
-  const [assets, setAssets] = useState<StudioAsset[]>([])
+  const [assets, setAssets] = useState<StoredAsset[]>([])
+  const canEdit = canEditContent(getCurrentUserRole())
 
   useEffect(() => {
-    const refresh = () => setAssets(getStoredAssets(projectId))
-    refresh()
-    window.addEventListener("wufang:assets-change", refresh)
-    window.addEventListener("storage", refresh)
-    return () => {
-      window.removeEventListener("wufang:assets-change", refresh)
-      window.removeEventListener("storage", refresh)
-    }
+    const controller = new AbortController()
+    fetchStudioSnapshot(controller.signal).then((snapshot) => {
+      setAssets(getAssetsFromSnapshot(snapshot, projectId) as StoredAsset[])
+    })
+    return () => controller.abort()
   }, [projectId])
 
-  const handleFiles = (fileList: FileList | null) => {
+  const handleFiles = async (fileList: FileList | null) => {
+    if (!canEdit) {
+      toast.error("当前身份无权上传素材")
+      return
+    }
+
     const files = Array.from(fileList ?? [])
     if (!files.length) return
 
-    const added = addStoredAssets(projectId, files)
-    setAssets(getStoredAssets(projectId))
-    toast.success("资料已加入项目素材库", {
-      description: `已登记 ${added.length} 个文件。`,
+    const formData = new FormData()
+    formData.append("projectId", projectId)
+    for (const file of files) {
+      formData.append("files", file)
+    }
+
+    const response = await fetch("/api/assets/upload", {
+      method: "POST",
+      headers: getCurrentSessionHeaders(),
+      body: formData,
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      toast.error("上传失败", { description: data?.error ?? "请重试" })
+      return
+    }
+
+    setAssets((current) => [...data.assets, ...current])
+    toast.success("素材已上传", {
+      description: `已上传 ${data.assets.length} 个文件`,
     })
     if (inputRef.current) inputRef.current.value = ""
   }
 
-  const removeAsset = (asset: StudioAsset) => {
-    removeStoredAsset(projectId, asset.id)
-    setAssets(getStoredAssets(projectId))
-    toast.success("资料已移除", { description: asset.name })
+  const removeAsset = async (asset: StoredAsset) => {
+    if (!canEdit) {
+      toast.error("当前身份无权删除素材")
+      return
+    }
+
+    const response = await fetch("/api/assets/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getCurrentSessionHeaders() },
+      body: JSON.stringify({
+        projectId,
+        assetId: asset.id,
+        filePath: asset.filePath,
+      }),
+    })
+    if (!response.ok) {
+      toast.error("删除失败")
+      return
+    }
+
+    setAssets((current) => current.filter((item) => item.id !== asset.id))
+    toast.success("素材已删除", { description: asset.name })
   }
 
   return (
@@ -77,9 +113,7 @@ export function ProjectAssetsPanel({
           <Paperclip className="size-4 text-primary" />
           项目素材库
         </CardTitle>
-        {!compact && (
-          <CardDescription>登记世界观、人设、参考剧本、图片和视频素材。</CardDescription>
-        )}
+        {!compact && <CardDescription>管理项目参考文件、图片、视频和音频素材。</CardDescription>}
       </CardHeader>
       <CardContent className={cn("grid gap-3", compact && "px-4")}>
         <input
@@ -87,28 +121,30 @@ export function ProjectAssetsPanel({
           type="file"
           multiple
           className="hidden"
-          onChange={(event) => handleFiles(event.target.files)}
+          disabled={!canEdit}
+          onChange={(event) => void handleFiles(event.target.files)}
         />
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
+          disabled={!canEdit}
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
             event.preventDefault()
-            handleFiles(event.dataTransfer.files)
+            void handleFiles(event.dataTransfer.files)
           }}
           className={cn(
-            "flex w-full min-w-0 flex-col items-center justify-center gap-2 overflow-hidden rounded-lg border border-dashed px-3 py-6 text-center transition-colors hover:bg-accent/40",
+            "flex w-full min-w-0 flex-col items-center justify-center gap-2 overflow-hidden rounded-lg border border-dashed px-3 py-6 text-center transition-colors hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-60",
             compact && "py-4",
           )}
         >
           <div className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
             <UploadCloud className="size-5" />
           </div>
-          <span className="max-w-full truncate text-sm font-medium">点击或拖拽文件加入素材库</span>
+          <span className="max-w-full truncate text-sm font-medium">点击或拖拽上传素材</span>
           {!compact && (
             <span className="max-w-full text-wrap text-xs text-muted-foreground">
-              当前版本保存文件信息，后续可接入公司对象存储。
+              文件会保存到服务端磁盘并同步到数据库。
             </span>
           )}
         </button>
@@ -117,10 +153,7 @@ export function ProjectAssetsPanel({
           {assets.map((asset) => {
             const Icon = assetIcon[asset.category]
             return (
-              <div
-                key={asset.id}
-                className="flex min-w-0 items-center gap-3 rounded-md border p-2"
-              >
+              <div key={asset.id} className="flex min-w-0 items-center gap-3 rounded-md border p-2">
                 <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
                   <Icon className="size-4" />
                 </div>
@@ -139,8 +172,9 @@ export function ProjectAssetsPanel({
                   variant="ghost"
                   size="icon"
                   className="size-8 shrink-0"
-                  onClick={() => removeAsset(asset)}
-                  aria-label="移除资料"
+                  onClick={() => void removeAsset(asset)}
+                  disabled={!canEdit}
+                  aria-label="删除素材"
                 >
                   <Trash2 className="size-4" />
                 </Button>
@@ -149,7 +183,7 @@ export function ProjectAssetsPanel({
           })}
           {assets.length === 0 && (
             <p className="rounded-md border border-dashed p-3 text-center text-sm text-muted-foreground">
-              暂无资料。
+              暂无素材。
             </p>
           )}
         </div>

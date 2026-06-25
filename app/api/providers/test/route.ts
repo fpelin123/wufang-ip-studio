@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { getSessionFromCookieHeader } from "@/lib/session"
 
 type TestRequest = {
   baseUrl?: string
@@ -7,6 +8,11 @@ type TestRequest = {
 }
 
 export async function POST(request: Request) {
+  const role = getSessionFromCookieHeader(request.headers.get("cookie")).role || "viewer"
+  if (role !== "admin" && role !== "editor") {
+    return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 })
+  }
+
   const body = (await request.json()) as TestRequest
   const baseUrl = body.baseUrl?.trim().replace(/\/$/, "")
 

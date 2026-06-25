@@ -28,6 +28,7 @@ import {
   upsertStoredProject,
   type StudioProject,
 } from "@/lib/local-store"
+import { canEditContent, getCurrentUserRole } from "@/lib/team"
 
 export function NewProjectDialog({ trigger }: { trigger?: React.ReactNode }) {
   const router = useRouter()
@@ -35,11 +36,18 @@ export function NewProjectDialog({ trigger }: { trigger?: React.ReactNode }) {
   const [name, setName] = React.useState("")
   const [type, setType] = React.useState(projectTypes[0])
   const [platform, setPlatform] = React.useState(platforms[0])
-  const [aspect, setAspect] = React.useState("9:16 竖屏")
+  const [aspect, setAspect] = React.useState("9:16 绔栖睆")
   const [episodes, setEpisodes] = React.useState(60)
   const [duration, setDuration] = React.useState("90s")
 
+  const canCreate = canEditContent(getCurrentUserRole())
+
   function handleCreate() {
+    if (!canCreate) {
+      toast.error("当前身份无权创建项目")
+      return
+    }
+
     const cleanName = name.trim() || "未命名项目"
     const project: StudioProject = {
       id: createProjectId(cleanName),
@@ -60,7 +68,7 @@ export function NewProjectDialog({ trigger }: { trigger?: React.ReactNode }) {
     upsertStoredProject(project)
     setOpen(false)
     setName("")
-    toast.success("项目已创建", { description: "已进入项目工作台。" })
+    toast.success("项目已创建")
     router.push("/workspace")
     router.refresh()
   }
@@ -82,16 +90,14 @@ export function NewProjectDialog({ trigger }: { trigger?: React.ReactNode }) {
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>新建项目</DialogTitle>
-          <DialogDescription>
-            填写最关键的生产规格，创建后进入工作台生成第一版策划案。
-          </DialogDescription>
+          <DialogDescription>填写项目规格，创建后进入工作台。</DialogDescription>
         </DialogHeader>
         <FieldGroup>
           <Field>
             <FieldLabel htmlFor="np-name">项目名称</FieldLabel>
             <Input
               id="np-name"
-              placeholder="例如：《千面》"
+              placeholder="例如：千面 IP"
               value={name}
               onChange={(event) => setName(event.target.value)}
             />
@@ -170,7 +176,9 @@ export function NewProjectDialog({ trigger }: { trigger?: React.ReactNode }) {
         </FieldGroup>
         <DialogFooter>
           <DialogClose render={<Button variant="outline">取消</Button>} />
-          <Button onClick={handleCreate}>创建项目</Button>
+          <Button onClick={handleCreate} disabled={!canCreate}>
+            创建项目
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

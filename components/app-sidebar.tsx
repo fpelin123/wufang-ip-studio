@@ -11,6 +11,7 @@ import {
   PackageOpen,
   Cpu,
   Sparkles,
+  Users,
 } from "lucide-react"
 
 import {
@@ -31,11 +32,14 @@ const navMain = [
   { title: "项目管理", href: "/projects", icon: FolderKanban },
   { title: "工具中心", href: "/tools", icon: Wrench },
   { title: "资产库", href: "/assets", icon: Library },
-  { title: "审核中心", href: "/review", icon: ClipboardCheck },
+  { title: "审校中心", href: "/review", icon: ClipboardCheck },
   { title: "导出中心", href: "/export", icon: PackageOpen },
 ]
 
-const navSystem = [{ title: "模型设置", href: "/settings", icon: Cpu }]
+const navSystem = [
+  { title: "模型设置", href: "/settings", icon: Cpu },
+  { title: "团队管理", href: "/team", icon: Users },
+]
 
 export function AppSidebar() {
   const pathname = usePathname()
@@ -52,9 +56,7 @@ export function AppSidebar() {
           </div>
           <div className="grid min-w-0 leading-tight group-data-[collapsible=icon]:hidden">
             <span className="truncate text-sm font-semibold">Wufang IP Studio</span>
-            <span className="truncate text-xs text-muted-foreground">
-              内部 IP 生产工作台
-            </span>
+            <span className="truncate text-xs text-muted-foreground">内部 IP 生产工作台</span>
           </div>
         </div>
       </SidebarHeader>

@@ -2,13 +2,11 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Search, ChevronDown, Cpu, LogOut, Settings, User } from "lucide-react"
+import { ChevronDown, Cpu, LogOut, Search, Settings, User } from "lucide-react"
 
-import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Separator } from "@/components/ui/separator"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
@@ -20,40 +18,30 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Separator } from "@/components/ui/separator"
+import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { NewProjectDialog } from "@/components/new-project-dialog"
-import {
-  getActiveProjectId,
-  getDefaultTextProvider,
-  getStoredProjects,
-  setActiveProjectId,
-  type StudioProject,
-} from "@/lib/local-store"
+import { fetchStudioSnapshot } from "@/lib/studio-snapshot"
+import { getActiveProjectId, setActiveProjectId, type StudioProject } from "@/lib/local-store"
+import { clearCurrentUser, ensureCurrentSession, getCurrentUserId, getCurrentUserRole, roleLabels } from "@/lib/team"
 
 export function TopBar() {
   const router = useRouter()
   const [projects, setProjects] = useState<StudioProject[]>([])
   const [activeId, setActiveId] = useState("")
-  const [modelName, setModelName] = useState("本地模板")
+  const [modelName, setModelName] = useState("未配置模型")
+  const [query, setQuery] = useState("")
 
   useEffect(() => {
-    const refresh = () => {
-      setProjects(getStoredProjects())
+    ensureCurrentSession()
+    const controller = new AbortController()
+    fetchStudioSnapshot(controller.signal).then((snapshot) => {
+      setProjects(snapshot.projects)
       setActiveId(getActiveProjectId())
-      setModelName(getDefaultTextProvider()?.textModel ?? "本地模板")
-    }
-
-    refresh()
-    window.addEventListener("wufang:active-project-change", refresh)
-    window.addEventListener("wufang:projects-change", refresh)
-    window.addEventListener("wufang:providers-change", refresh)
-    window.addEventListener("storage", refresh)
-    return () => {
-      window.removeEventListener("wufang:active-project-change", refresh)
-      window.removeEventListener("wufang:projects-change", refresh)
-      window.removeEventListener("wufang:providers-change", refresh)
-      window.removeEventListener("storage", refresh)
-    }
+      setModelName(snapshot.providers.find((provider) => provider.enabled)?.textModel ?? "未配置模型")
+    })
+    return () => controller.abort()
   }, [])
 
   const changeProject = (value: string | null) => {
@@ -62,6 +50,13 @@ export function TopBar() {
     setActiveId(value)
     router.push("/workspace")
     router.refresh()
+  }
+
+  const submitSearch = () => {
+    const keyword = query.trim()
+    if (!keyword) return
+    router.push(`/search?q=${encodeURIComponent(keyword)}`)
+    setQuery("")
   }
 
   return (
@@ -87,13 +82,19 @@ export function TopBar() {
           <InputGroupAddon>
             <Search />
           </InputGroupAddon>
-          <InputGroupInput placeholder="搜索项目、文档、资产" />
+          <InputGroupInput
+            placeholder="搜索项目、文档、素材、审校"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") submitSearch()
+            }}
+          />
         </InputGroup>
       </div>
 
       <div className="flex items-center gap-2">
         <NewProjectDialog />
-
         <Tooltip>
           <TooltipTrigger
             render={
@@ -104,9 +105,7 @@ export function TopBar() {
               </Badge>
             }
           />
-          <TooltipContent side="bottom">
-            文本生成默认模型，可在“模型设置”中调整。
-          </TooltipContent>
+          <TooltipContent side="bottom">当前启用的文本模型</TooltipContent>
         </Tooltip>
 
         <Separator orientation="vertical" className="h-5" />
@@ -116,25 +115,27 @@ export function TopBar() {
             render={
               <Button variant="ghost" className="h-9 gap-2 px-1.5" aria-label="用户菜单">
                 <Avatar className="size-7">
-                  <AvatarFallback className="bg-primary/10 text-xs text-primary">五方</AvatarFallback>
+                  <AvatarFallback className="bg-primary/10 text-xs text-primary">团</AvatarFallback>
                 </Avatar>
                 <span className="hidden text-sm font-medium md:inline">内部团队</span>
                 <ChevronDown className="hidden size-4 text-muted-foreground md:inline" />
               </Button>
             }
           />
-          <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuContent align="end" className="w-52">
             <DropdownMenuLabel>
               <div className="grid leading-tight">
                 <span className="text-sm font-medium text-foreground">Wufang IP Studio</span>
-                <span className="text-xs font-normal">创作生产工作台</span>
+                <span className="text-xs font-normal">
+                  {getCurrentUserId() || "未登录"} · {roleLabels[getCurrentUserRole()]}
+                </span>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push("/login")}>
                 <User />
-                个人资料
+                登录 / 切换身份
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => router.push("/settings")}>
                 <Settings />
@@ -142,9 +143,15 @@ export function TopBar() {
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive">
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => {
+                clearCurrentUser()
+                router.push("/login")
+              }}
+            >
               <LogOut />
-              退出登录
+              退出
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

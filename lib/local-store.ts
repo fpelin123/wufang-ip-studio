@@ -49,16 +49,7 @@ const keys = {
 
 export const projectTypes = ["AI漫剧", "微短剧", "IP样片", "文旅方案", "AIGC培训", "自定义"]
 export const platforms = ["红果", "芒果TV", "B站", "抖音", "腾讯", "优酷", "自定义"]
-export const defaultDeliverables = [
-  "策划案",
-  "分集大纲",
-  "剧本",
-  "导演讲戏",
-  "分镜",
-  "视觉资产",
-  "审核报告",
-  "资料包",
-]
+export const defaultDeliverables = ["策划案", "分集大纲", "剧本", "导演讲戏", "分镜", "视觉资产", "审核报告", "资料包"]
 
 const defaultProjects: StudioProject[] = [
   {
@@ -69,7 +60,7 @@ const defaultProjects: StudioProject[] = [
     aspect: "9:16 竖屏",
     episodes: 60,
     duration: "90s",
-    owner: "林知远",
+    owner: "林知遥",
     updatedAt: "2026-06-22 14:20",
     progress: 72,
     status: "in-progress",
@@ -80,7 +71,6 @@ const defaultProjects: StudioProject[] = [
 
 function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback
-
   try {
     const raw = window.localStorage.getItem(key)
     return raw ? (JSON.parse(raw) as T) : fallback
@@ -94,11 +84,31 @@ function writeJson<T>(key: string, value: T) {
   window.localStorage.setItem(key, JSON.stringify(value))
 }
 
+export function hydrateStoredProjects(value: StudioProject[]) {
+  writeJson(keys.projects, value)
+}
+
+export function hydrateStoredProviders(value: StudioProvider[]) {
+  writeJson(keys.providers, value)
+}
+
+export function hydrateStoredReviewIssues(value: StudioReviewIssue[]) {
+  writeJson(keys.reviewIssues, value)
+}
+
+export function hydrateStoredAssets(projectId: string, value: StudioAsset[]) {
+  writeJson(getProjectAssetKey(projectId), value)
+}
+
+export function hydrateStoredWorkflowDocument(projectId: string, step: string, content: string) {
+  saveStoredWorkflowDocument(projectId, step, content)
+}
+
 function normalizeProvider(provider: Provider): StudioProvider {
   return {
     ...provider,
-    visionModel: provider.visionModel === "鈥?" ? "—" : provider.visionModel,
-    imageModel: provider.imageModel === "鈥?" ? "—" : provider.imageModel,
+    visionModel: provider.visionModel === "—" ? "" : provider.visionModel,
+    imageModel: provider.imageModel === "—" ? "" : provider.imageModel,
     apiKey: "",
     temperature: 0.7,
     maxTokens: 4000,
@@ -123,9 +133,7 @@ export function upsertStoredProject(project: StudioProject) {
 
 export function updateStoredProject(id: string, patch: Partial<StudioProject>) {
   const existing = getStoredProjects()
-  const next = existing.map((project) =>
-    project.id === id ? { ...project, ...patch } : project,
-  )
+  const next = existing.map((project) => (project.id === id ? { ...project, ...patch } : project))
   saveStoredProjects(next)
   window.dispatchEvent(new CustomEvent("wufang:projects-change", { detail: id }))
   return next.find((project) => project.id === id)
@@ -207,6 +215,25 @@ export function saveStoredWorkflowDocument(projectId: string, step: string, cont
   if (step === "proposal") saveStoredDocument(projectId, content)
 }
 
+export function saveToolOutputToProject(
+  projectId: string,
+  step: string,
+  content: string,
+  options?: {
+    stepLabel?: string
+    progress?: number
+    status?: WorkflowStatus
+  },
+) {
+  saveStoredWorkflowDocument(projectId, step, content)
+  updateProjectWorkflow(
+    projectId,
+    options?.stepLabel ?? (step === "proposal" ? "策划案" : step),
+    options?.progress ?? (step === "proposal" ? 18 : 100),
+    options?.status ?? (step === "proposal" ? "in-progress" : "passed"),
+  )
+}
+
 export function getStoredReviewIssues(): StudioReviewIssue[] {
   return readJson<StudioReviewIssue[]>(keys.reviewIssues, reviewIssues)
 }
@@ -224,9 +251,7 @@ export function addStoredReviewIssue(issue: StudioReviewIssue) {
 }
 
 export function updateStoredReviewIssue(id: string, patch: Partial<StudioReviewIssue>) {
-  const next = getStoredReviewIssues().map((issue) =>
-    issue.id === id ? { ...issue, ...patch } : issue,
-  )
+  const next = getStoredReviewIssues().map((issue) => (issue.id === id ? { ...issue, ...patch } : issue))
   saveStoredReviewIssues(next)
   window.dispatchEvent(new CustomEvent("wufang:review-issues-change", { detail: id }))
 }
@@ -284,7 +309,7 @@ export function removeStoredAsset(projectId: string, assetId: string) {
 export function createProjectId(name: string) {
   const slug = name
     .trim()
-    .replace(/[《》、“”"'`~!@#$%^&*()+=[\]{}\\|;:,.<>/?，。！？、\s]/g, "")
+    .replace(/[^\w\u4e00-\u9fa5]+/g, "")
     .toLowerCase()
     .slice(0, 24)
   return `${slug || "project"}-${Date.now().toString(36)}`

@@ -8,6 +8,7 @@ import {
   ClipboardCheck,
   FileText,
   PackageOpen,
+  Activity,
   Wrench,
 } from "lucide-react"
 
@@ -40,7 +41,8 @@ import {
   tools,
   type WorkflowStatus,
 } from "@/lib/data"
-import { getStoredProjects, type StudioProject } from "@/lib/local-store"
+import { type StudioProject } from "@/lib/local-store"
+import { fetchStudioSnapshot } from "@/lib/studio-snapshot"
 
 const pendingReviews = [
   { project: "《凿天》", stage: "剧本", owner: "周慕白", time: "2 小时前" },
@@ -53,18 +55,20 @@ const quickTools = tools.slice(0, 4)
 export default function DashboardPage() {
   const router = useRouter()
   const [projects, setProjects] = useState<StudioProject[]>([])
+  const [activities, setActivities] = useState<
+    { id: string; action: string; target: string; detail: string; createdAt: string }[]
+  >([])
+
+  const refreshProjects = async (signal?: AbortSignal) => {
+    const snapshot = await fetchStudioSnapshot(signal)
+    setProjects(snapshot.projects)
+    setActivities((snapshot.auditEvents ?? []).slice(0, 5))
+  }
 
   useEffect(() => {
-    const refresh = () => setProjects(getStoredProjects())
-    refresh()
-    window.addEventListener("wufang:active-project-change", refresh)
-    window.addEventListener("wufang:projects-change", refresh)
-    window.addEventListener("storage", refresh)
-    return () => {
-      window.removeEventListener("wufang:active-project-change", refresh)
-      window.removeEventListener("wufang:projects-change", refresh)
-      window.removeEventListener("storage", refresh)
-    }
+    const controller = new AbortController()
+    refreshProjects(controller.signal)
+    return () => controller.abort()
   }, [])
 
   const summary: { label: string; key: WorkflowStatus; count: number }[] = [
@@ -144,17 +148,9 @@ export default function DashboardPage() {
               </TableHeader>
               <TableBody>
                 {projects.slice(0, 5).map((p) => (
-                  <TableRow
-                    key={p.id}
-                    className="cursor-pointer"
-                    onClick={() => router.push(`/projects/${p.id}`)}
-                  >
+                  <TableRow key={p.id} className="cursor-pointer" onClick={() => router.push(`/projects/${p.id}`)}>
                     <TableCell className="pl-6">
-                      <Link
-                        href={`/projects/${p.id}`}
-                        onClick={(event) => event.stopPropagation()}
-                        className="font-medium hover:underline"
-                      >
+                      <Link href={`/projects/${p.id}`} className="font-medium hover:underline">
                         {p.name}
                       </Link>
                       <div className="text-xs text-muted-foreground">
@@ -224,6 +220,30 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Activity className="size-4 text-primary" />
+            最近活动
+          </CardTitle>
+          <CardDescription>最近的项目、同步和文档动作</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          {activities.map((item) => (
+            <div key={item.id} className="flex items-center justify-between gap-4 rounded-lg border px-4 py-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{item.action} · {item.target}</div>
+                <div className="truncate text-xs text-muted-foreground">{item.detail}</div>
+              </div>
+              <div className="shrink-0 text-xs text-muted-foreground">{item.createdAt}</div>
+            </div>
+          ))}
+          {activities.length === 0 && (
+            <p className="text-sm text-muted-foreground">暂无活动记录。</p>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Quick tools */}

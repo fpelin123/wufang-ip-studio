@@ -13,4 +13,6 @@ __v0_jsx-dev-runtime.ts
 node_modules
 .next/
 tsconfig.tsbuildinfo
+data/*.sqlite
+data/*.sqlite-*
 .DS_Store

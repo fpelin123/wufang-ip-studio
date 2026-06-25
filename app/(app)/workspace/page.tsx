@@ -1,64 +1,56 @@
-"use client"
+﻿"use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
-  Sparkles,
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  Clock,
+  Download,
+  Eye,
+  FileText,
+  PackageOpen,
+  Pencil,
   RefreshCw,
   ShieldCheck,
-  Download,
-  PackageOpen,
-  Eye,
-  Pencil,
-  FileText,
-  CheckCircle2,
-  CircleDashed,
-  Clock,
-  AlertTriangle,
-  ChevronRight,
+  Sparkles,
   Boxes,
+  CircleDashed,
+  ChevronRight,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
+import { ProjectAccessChip } from "@/components/project-access-chip"
 import { ProjectAssetsPanel } from "@/components/project-assets-panel"
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { workflowSteps, qualityGates, type WorkflowStatus, type QualityGate } from "@/lib/data"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
-  workflowSteps,
-  qualityGates,
-  type WorkflowStatus,
-  type QualityGate,
-} from "@/lib/data"
-import {
-  getActiveProject,
+  getActiveProjectId,
   getActiveWorkflowStep,
   getDefaultTextProvider,
-  getStoredAssets,
-  getStoredWorkflowDocument,
   addStoredReviewIssue,
   saveStoredWorkflowDocument,
   setActiveWorkflowStep,
   updateProjectWorkflow,
-  type StudioProject,
   type StudioAsset,
+  type StudioProject,
 } from "@/lib/local-store"
+import { canEditContent, getCurrentUserId, getCurrentUserRole } from "@/lib/team"
+import { fetchStudioSnapshot, getAssetsFromSnapshot, getWorkflowDocumentFromSnapshot } from "@/lib/studio-snapshot"
+import { acquireProjectLock, fetchProjectLock, releaseProjectLock, type ProjectLock } from "@/lib/project-lock"
+
+type VersionItem = {
+  versionLabel: string
+  content: string
+  createdAt: string
+}
 
 const stepIcon: Record<WorkflowStatus, typeof CheckCircle2> = {
   passed: CheckCircle2,
@@ -81,43 +73,32 @@ const gateIcon: Record<QualityGate["status"], typeof CheckCircle2> = {
   pending: Clock,
   failed: AlertTriangle,
 }
+
 const gateColor: Record<QualityGate["status"], string> = {
   passed: "text-emerald-600",
   pending: "text-amber-600",
   failed: "text-red-600",
 }
 
-const sampleDoc = `# 《千面》IP 策划案
+const fallbackDoc = `# Wufang IP Studio
 
-## 一、项目定位
-《千面》是一部面向红果平台的竖屏 AI 漫剧，主打"东方悬疑 + 身份谜题"。以"一人千面"的换脸异能为核心钩子，单集 90 秒，强节奏、强反转。
+## 工作目标
+围绕项目当前阶段完成标准化内容产出。
 
-## 二、世界观
-故事发生在架空王朝"昭"。乱世之中，一群拥有"易面"之术的异人游走于权力夹缝。主角沈千面背负灭门之仇，借千面之术潜入各方势力，逐步揭开当年血案真相。
-
-## 三、核心人物
-- **沈千面**：银发赤瞳，左眉骨疤痕。冷静、隐忍，目标是复仇与真相。
-- **凿天君**：昭国最强武者，亦敌亦友，掌握关键线索。
-- **苏晚晴**：书院遗孤，沈千面唯一信任之人。
-
-## 四、剧集结构
-- 第一卷（EP01-EP12）：复仇起势，潜入相府。
-- 第二卷（EP13-EP36）：身份反转，多方角力。
-- 第三卷（EP37-EP60）：真相揭露，终局对决。
-
-## 五、商业化与平台适配
-画幅 9:16，单集 90s，符合红果短剧投流模型；前 3 集设置强钩子，第 6 集首个大反转，留存目标 ≥ 45%。`
+## 操作说明
+1. 点击左侧流程切换阶段。
+2. 编辑中间正文会自动保存到本地和数据库。
+3. 右侧可查看版本、素材和质检状态。
+`
 
 function getStepFallback(project: StudioProject, stepKey: string) {
   const step = workflowSteps.find((item) => item.key === stepKey)
   const title = step?.label ?? "工作文档"
 
-  if (stepKey === "proposal" && project.id === "qm") return sampleDoc
-
   return `# ${project.name} ${title}
 
 ## 工作目标
-围绕 ${project.platform} 平台、${project.aspect}、${project.episodes} 集、单集 ${project.duration} 的规格，完成「${title}」阶段文档。
+围绕 ${project.platform} 平台、${project.aspect} 画幅、${project.episodes} 集、单集 ${project.duration} 的规格，完成 ${title} 阶段文档。
 
 ## 当前输入
 - 项目类型：${project.type}
@@ -156,53 +137,113 @@ function safeFilename(value: string) {
   return value.replace(/[\\/:*?"<>|]/g, "") || "wufang-project"
 }
 
-function formatAssetList(assets: StudioAsset[]) {
-  if (!assets.length) return "暂无登记素材。"
-  return assets
-    .map((asset) => `- ${asset.name}（${asset.category}，${formatBytes(asset.size)}，${asset.addedAt}）`)
-    .join("\n")
-}
-
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-export default function WorkspacePage() {
-  const [activeStep, setActiveStep] = useState("proposal")
-  const [preview, setPreview] = useState(false)
-  const [content, setContent] = useState(sampleDoc)
-  const [project, setProject] = useState<StudioProject | null>(null)
-  const [generating, setGenerating] = useState(false)
+function formatAssetList(assets: StudioAsset[]) {
+  if (!assets.length) return "暂无登记素材。"
+  return assets
+    .map((asset) => `- ${asset.name}｜${asset.category}｜${formatBytes(asset.size)}｜${asset.addedAt}`)
+    .join("\n")
+}
 
-  const current = workflowSteps.find((s) => s.key === activeStep)
+export default function WorkspacePage() {
+  const [project, setProject] = useState<StudioProject | null>(null)
+  const [activeStep, setActiveStep] = useState("proposal")
+  const [content, setContent] = useState(fallbackDoc)
+  const [preview, setPreview] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [versions, setVersions] = useState<VersionItem[]>([])
+  const [selectedVersion, setSelectedVersion] = useState("current")
+  const [lock, setLock] = useState<ProjectLock | null>(null)
+
+  const current = workflowSteps.find((step) => step.key === activeStep)
+  const currentVersion = useMemo(() => versions.find((item) => item.versionLabel === selectedVersion), [versions, selectedVersion])
+  const canEditByRole = canEditContent(getCurrentUserRole())
+  const currentUserId = getCurrentUserId()
+  const isLockedByOther = Boolean(lock && lock.userId !== currentUserId)
+  const canEdit = canEditByRole && (!lock || lock.userId === getCurrentUserId())
+
+  const hydrateFromSnapshot = (snapshot: Awaited<ReturnType<typeof fetchStudioSnapshot>>, projectId: string, step: string) => {
+    const activeProject = snapshot.projects.find((item) => item.id === projectId) ?? snapshot.projects[0] ?? null
+    if (!activeProject) return null
+
+    const nextContent = getWorkflowDocumentFromSnapshot(snapshot, activeProject.id, step) ?? getStepFallback(activeProject, step)
+    const nextVersions = (snapshot.workflowDocumentVersions ?? [])
+      .filter((item) => item.projectId === activeProject.id && item.stepKey === step)
+      .map((item) => ({ versionLabel: item.versionLabel, content: item.content, createdAt: item.createdAt }))
+
+    setProject(activeProject)
+    setActiveStep(step)
+    setContent(nextContent)
+    setVersions(nextVersions)
+    setSelectedVersion("current")
+    return activeProject
+  }
+
+  const refreshSnapshot = async (projectId: string, step: string) => {
+    const snapshot = await fetchStudioSnapshot()
+    hydrateFromSnapshot(snapshot, projectId, step)
+  }
 
   useEffect(() => {
-    const loadActiveProject = () => {
-      const activeProject = getActiveProject()
-      const step = getActiveWorkflowStep()
-      setProject(activeProject)
-      setActiveStep(step)
-      setContent(getStoredWorkflowDocument(activeProject.id, step, getStepFallback(activeProject, step)))
-    }
+    let cancelled = false
 
-    loadActiveProject()
-    window.addEventListener("wufang:active-project-change", loadActiveProject)
+    void fetchStudioSnapshot().then((snapshot) => {
+      if (cancelled) return
+      const activeId = getActiveProjectId()
+      const step = getActiveWorkflowStep()
+      hydrateFromSnapshot(snapshot, activeId, step)
+    })
+
+    void (async () => {
+      if (cancelled) return
+      const activeId = getActiveProjectId()
+      const nextLock = await fetchProjectLock(activeId)
+      if (cancelled) return
+      setLock(nextLock)
+      if (canEditByRole) {
+        const result = await acquireProjectLock(activeId)
+        if (cancelled) return
+        if (result.acquired) {
+          setLock(result.lock)
+        } else {
+          setLock(result.lock)
+        }
+      }
+    })()
+
     return () => {
-      window.removeEventListener("wufang:active-project-change", loadActiveProject)
+      cancelled = true
     }
   }, [])
 
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (project) void releaseProjectLock(project.id)
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
+  }, [project?.id])
+
   const updateContent = (value: string) => {
+    if (!canEdit) return
     setContent(value)
     if (project) saveStoredWorkflowDocument(project.id, activeStep, value)
   }
 
   const changeStep = (step: string) => {
+    if (!canEdit) {
+      toast.error("当前身份无权切换工作流阶段")
+      return
+    }
     const workflowStep = workflowSteps.find((item) => item.key === step)
     setActiveStep(step)
     setActiveWorkflowStep(step)
+
     if (project) {
       const nextProject = updateProjectWorkflow(
         project.id,
@@ -211,17 +252,47 @@ export default function WorkspacePage() {
         getStepProjectStatus(step),
       )
       if (nextProject) setProject(nextProject)
-      setContent(getStoredWorkflowDocument(project.id, step, getStepFallback(project, step)))
+      void refreshSnapshot(project.id, step)
     }
   }
 
-  const generateProposal = async () => {
+  const handleVersionSelect = (value: string | null) => {
+    if (!value) return
+    setSelectedVersion(value)
+    if (value === "current") {
+      return
+    }
+    const version = versions.find((item) => item.versionLabel === value)
+    if (version) {
+      setContent(version.content)
+      setPreview(false)
+    }
+  }
+
+  const resetCurrentContent = async () => {
     if (!project) return
+    await refreshSnapshot(project.id, activeStep)
+    toast.success("已恢复当前版本")
+  }
+
+  const restoreVersion = async () => {
+    if (!project || selectedVersion === "current") return
+    const version = versions.find((item) => item.versionLabel === selectedVersion)
+    if (!version) return
+
+    updateContent(version.content)
+    await refreshSnapshot(project.id, activeStep)
+    toast.success(`已恢复 ${version.versionLabel} 为当前版本`)
+  }
+
+  const generateProposal = async () => {
+    if (!project || !canEdit) return
 
     setGenerating(true)
     try {
       const provider = getDefaultTextProvider()
-      const assets = getStoredAssets(project.id)
+      const snapshot = await fetchStudioSnapshot()
+      const assets = getAssetsFromSnapshot(snapshot, project.id)
       const step = current ? { key: current.key, label: current.label } : { key: activeStep, label: activeStep }
       const response = await fetch("/api/generate/proposal", {
         method: "POST",
@@ -240,9 +311,10 @@ export default function WorkspacePage() {
         getStepProjectStatus(step.key),
       )
       if (nextProject) setProject(nextProject)
-      toast.success(data.source === "model" ? `${step.label}已由模型生成` : `已生成本地模板${step.label}`, {
-        description: data.source === "model" ? provider?.textModel : "未配置API Key，使用本地模板。",
+      toast.success(data.source === "model" ? `${step.label}已由模型生成` : `已生成本地模板：${step.label}`, {
+        description: data.source === "model" ? provider?.textModel ?? "模型" : "未配置 API Key，使用本地模板。",
       })
+      void refreshSnapshot(project.id, step.key)
     } catch (error) {
       toast.error("生成失败", {
         description: error instanceof Error ? error.message : "请检查模型配置。",
@@ -259,31 +331,20 @@ export default function WorkspacePage() {
     toast.success("已导出当前文档")
   }
 
-  const exportPackage = () => {
-    if (!project) return
+  const exportPackage = async () => {
+    if (!project || !canEdit) {
+      if (!canEdit) toast.error("当前身份无权导出")
+      return
+    }
 
-    const assets = getStoredAssets(project.id)
+    const snapshot = await fetchStudioSnapshot()
+    const assets = getAssetsFromSnapshot(snapshot, project.id)
     const sections = workflowSteps.map((step) => {
-      const document = getStoredWorkflowDocument(project.id, step.key, getStepFallback(project, step.key))
+      const document = getWorkflowDocumentFromSnapshot(snapshot, project.id, step.key) ?? getStepFallback(project, step.key)
       return `## ${step.label}\n\n${document}`
     })
-    const markdown = `# ${project.name} 项目资料包
 
-## 项目规格
-- 项目类型：${project.type}
-- 平台：${project.platform}
-- 画幅：${project.aspect}
-- 集数：${project.episodes}
-- 单集时长：${project.duration}
-- 当前阶段：${project.currentStep}
-- 当前状态：${project.status}
-- 更新时间：${project.updatedAt}
-
-## 素材清单
-${formatAssetList(assets)}
-
-${sections.join("\n\n---\n\n")}
-`
+    const markdown = `# ${project.name} 项目资料包\n\n## 项目规格\n- 项目类型：${project.type}\n- 平台：${project.platform}\n- 画幅：${project.aspect}\n- 集数：${project.episodes}\n- 单集时长：${project.duration}\n- 当前阶段：${project.currentStep}\n- 当前状态：${project.status}\n- 更新时间：${project.updatedAt}\n\n## 素材清单\n${formatAssetList(assets)}\n\n${sections.join("\n\n---\n\n")}`
 
     downloadMarkdown(`${safeFilename(project.name)}-项目资料包.md`, markdown)
     const nextProject = updateProjectWorkflow(project.id, "导出", 100, "passed")
@@ -292,30 +353,28 @@ ${sections.join("\n\n---\n\n")}
   }
 
   const submitReview = () => {
-    if (!project || !current) return
+    if (!project || !current || !canEdit) {
+      if (!canEdit) toast.error("当前身份无权发起审校")
+      return
+    }
 
     const issue = addStoredReviewIssue({
       id: `R-${Date.now().toString().slice(-6)}`,
       project: project.name,
       projectId: project.id,
-      location: `${current.label} · 当前文档`,
+      location: `${current.label} / 当前文档`,
       severity: current.key === "review" ? "P1" : "P2",
       type: current.key === "storyboard" ? "时长" : "格式",
       summary:
         current.key === "storyboard"
-          ? "请检查分镜单块时长是否控制在 4-15 秒，并补齐缺失镜头字段。"
-          : `已提交「${current.label}」阶段审核，请检查结构完整性、平台适配和对外表达风险。`,
+          ? "请检查单镜头时长是否控制在 4-15 秒，并补齐缺失镜头字段。"
+          : `已提交 ${current.label} 阶段审核，请检查结构完整性、平台适配和对外表达风险。`,
       status: "open",
-      reviewer: "审核组·系统",
+      reviewer: "审核中心",
       createdAt: new Date().toLocaleString("zh-CN", { hour12: false }),
     })
 
-    const nextProject = updateProjectWorkflow(
-      project.id,
-      "审核",
-      getStepProgress("review"),
-      "pending-review",
-    )
+    const nextProject = updateProjectWorkflow(project.id, "审核", getStepProgress("review"), "pending-review")
     if (nextProject) setProject(nextProject)
     changeStep("review")
     toast.success("已提交审核", { description: `审核记录 ${issue.id} 已进入审核中心。` })
@@ -323,45 +382,40 @@ ${sections.join("\n\n---\n\n")}
 
   return (
     <div className="flex h-[calc(100svh-3.5rem-3rem)] min-h-[600px] flex-col gap-4 md:h-[calc(100svh-3.5rem-3rem)]">
-      {/* Project header */}
       <div className="flex flex-wrap items-center gap-3 border-b pb-3">
-        <h1 className="text-lg font-semibold">{project?.name ?? "《千面》"}</h1>
-        <Badge variant="secondary">{project?.type ?? "AI漫剧"}</Badge>
+        <h1 className="text-lg font-semibold">{project?.name ?? "工作台"}</h1>
+        <Badge variant="secondary">{project?.type ?? "项目"}</Badge>
+        <ProjectAccessChip editable={canEdit} />
+        {lock && !canEdit && <span className="text-xs text-muted-foreground">{lock.userName} 正在编辑</span>}
         <span className="text-sm text-muted-foreground">
-          {project?.platform ?? "红果"} · {project?.aspect ?? "9:16 竖屏"} · {project?.episodes ?? 60} 集 · {project?.duration ?? "90s"}
+          {project?.platform ?? "平台"} · {project?.aspect ?? "画幅"} · {project?.episodes ?? 0} 集 · {project?.duration ?? "时长"}
         </span>
-        <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
-          负责人 {project?.owner ?? "林知遥"} · 更新于 {project?.updatedAt ?? "14:20"}
+        <div className="ml-auto text-sm text-muted-foreground">
+          负责人 {project?.owner ?? "-"} · 更新于 {project?.updatedAt ?? "-"}
         </div>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[220px_minmax(0,1fr)_300px]">
-        {/* Left: workflow tree */}
         <Card className="hidden min-h-0 py-0 lg:flex">
           <ScrollArea className="h-full">
             <div className="p-3">
-              <p className="px-2 pb-2 text-xs font-medium text-muted-foreground">
-                工作流
-              </p>
+              <p className="px-2 pb-2 text-xs font-medium text-muted-foreground">工作流</p>
               <div className="flex flex-col gap-0.5">
-                {workflowSteps.map((s, i) => {
-                  const Icon = stepIcon[s.status]
+                {workflowSteps.map((step, index) => {
+                  const Icon = stepIcon[step.status]
                   return (
                     <button
-                      key={s.key}
-                      onClick={() => changeStep(s.key)}
+                      key={step.key}
+                      onClick={() => changeStep(step.key)}
+                      disabled={!canEdit}
                       className={cn(
-                        "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                        activeStep === s.key && "bg-accent font-medium",
+                        "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60",
+                        activeStep === step.key && "bg-accent font-medium",
                       )}
                     >
-                      <span className="w-4 shrink-0 text-center text-xs tabular-nums text-muted-foreground">
-                        {i + 1}
-                      </span>
-                      <Icon
-                        className={cn("size-4 shrink-0", stepIconColor[s.status])}
-                      />
-                      <span className="flex-1 truncate">{s.label}</span>
+                      <span className="w-4 shrink-0 text-center text-xs tabular-nums text-muted-foreground">{index + 1}</span>
+                      <Icon className={cn("size-4 shrink-0", stepIconColor[step.status])} />
+                      <span className="flex-1 truncate">{step.label}</span>
                     </button>
                   )
                 })}
@@ -370,30 +424,31 @@ ${sections.join("\n\n---\n\n")}
           </ScrollArea>
         </Card>
 
-        {/* Center: editor */}
         <Card className="min-h-0 gap-0 py-0">
           <div className="flex flex-wrap items-center gap-2 border-b p-3">
             <FileText className="size-4 text-muted-foreground" />
-            <span className="text-sm font-medium">
-              {current?.label ?? "策划案"}
-            </span>
+            <span className="text-sm font-medium">{current?.label ?? "文档"}</span>
             {current && <StatusBadge status={current.status} />}
             <div className="ml-auto flex items-center gap-2">
-              <Select defaultValue="v3">
-                <SelectTrigger size="sm" className="w-28">
-                  <SelectValue />
+              <Select value={selectedVersion} onValueChange={handleVersionSelect}>
+                <SelectTrigger size="sm" className="w-44">
+                  <SelectValue placeholder="当前版本" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="v3">版本 v3（当前）</SelectItem>
-                  <SelectItem value="v2">版本 v2</SelectItem>
-                  <SelectItem value="v1">版本 v1</SelectItem>
+                  <SelectItem value="current">当前版本</SelectItem>
+                  {versions.map((version) => (
+                    <SelectItem key={version.versionLabel} value={version.versionLabel}>
+                      {version.versionLabel} · {version.createdAt}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPreview((p) => !p)}
-              >
+              {currentVersion && selectedVersion !== "current" && (
+                <Badge variant="outline" className="hidden sm:inline-flex">
+                  {currentVersion.versionLabel}
+                </Badge>
+              )}
+              <Button variant="outline" size="sm" onClick={() => setPreview((value) => !value)}>
                 {preview ? (
                   <>
                     <Pencil data-icon="inline-start" />
@@ -417,54 +472,46 @@ ${sections.join("\n\n---\n\n")}
             ) : (
               <Textarea
                 value={content}
-                onChange={(e) => updateContent(e.target.value)}
+                onChange={(event) => updateContent(event.target.value)}
+                readOnly={!canEdit}
                 className="h-full min-h-[320px] resize-none rounded-none border-0 font-mono text-sm leading-relaxed focus-visible:ring-0"
               />
             )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t p-3">
-            <Button size="sm" onClick={generateProposal} disabled={generating}>
+            <Button size="sm" onClick={generateProposal} disabled={generating || !canEdit}>
               <Sparkles data-icon="inline-start" />
               {generating ? "生成中" : "生成"}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => toast.success("已重写选定段落")}
-            >
+            <Button variant="outline" size="sm" onClick={() => void resetCurrentContent()}>
               <RefreshCw data-icon="inline-start" />
-              改写
+              重置
             </Button>
             <Button
               variant="outline"
               size="sm"
-              onClick={submitReview}
+              onClick={() => void restoreVersion()}
+              disabled={selectedVersion === "current"}
             >
+              <ArrowRight data-icon="inline-start" />
+              恢复版本
+            </Button>
+            <Button variant="outline" size="sm" onClick={submitReview} disabled={!canEdit}>
               <ShieldCheck data-icon="inline-start" />
               审核
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={exportMarkdown}
-            >
+            <Button variant="outline" size="sm" onClick={exportMarkdown}>
               <Download data-icon="inline-start" />
               导出
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="ml-auto"
-              onClick={exportPackage}
-            >
+            <Button variant="outline" size="sm" className="ml-auto" onClick={exportPackage} disabled={!canEdit}>
               <PackageOpen data-icon="inline-start" />
               资料包
             </Button>
           </div>
         </Card>
 
-        {/* Right: panels */}
         <div className="hidden min-h-0 lg:block">
           <ScrollArea className="h-full">
             <div className="flex flex-col gap-4 pr-3">
@@ -473,10 +520,10 @@ ${sections.join("\n\n---\n\n")}
                   <CardTitle className="text-sm">项目规格</CardTitle>
                 </CardHeader>
                 <CardContent className="grid gap-2 px-4 text-xs">
-                  <SpecRow label="平台" value={project?.platform ?? "红果"} />
-                  <SpecRow label="画幅" value={project?.aspect ?? "9:16 竖屏"} />
-                  <SpecRow label="集数" value={`${project?.episodes ?? 60} 集`} />
-                  <SpecRow label="单集时长" value={project?.duration ?? "90s"} />
+                  <SpecRow label="平台" value={project?.platform ?? "-"} />
+                  <SpecRow label="画幅" value={project?.aspect ?? "-"} />
+                  <SpecRow label="集数" value={`${project?.episodes ?? 0} 集`} />
+                  <SpecRow label="单集时长" value={project?.duration ?? "-"} />
                   <SpecRow label="视频引擎" value="Seedance" />
                 </CardContent>
               </Card>
@@ -489,13 +536,11 @@ ${sections.join("\n\n---\n\n")}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-wrap gap-1.5 px-4">
-                  {["平台规格", "IP设定", "角色锁定", "分镜模板", "Seedance"].map(
-                    (m) => (
-                      <Badge key={m} variant="secondary" className="font-normal">
-                        {m}
-                      </Badge>
-                    ),
-                  )}
+                  {["平台规格", "IP设定", "角色锁定", "分镜模板", "Seedance"].map((item) => (
+                    <Badge key={item} variant="secondary" className="font-normal">
+                      {item}
+                    </Badge>
+                  ))}
                 </CardContent>
               </Card>
 
@@ -504,15 +549,12 @@ ${sections.join("\n\n---\n\n")}
                   <CardTitle className="text-sm">质量门</CardTitle>
                 </CardHeader>
                 <CardContent className="grid gap-2 px-4">
-                  {qualityGates.map((g) => {
-                    const Icon = gateIcon[g.status]
+                  {qualityGates.map((gate) => {
+                    const Icon = gateIcon[gate.status]
                     return (
-                      <div
-                        key={g.label}
-                        className="flex items-center gap-2 text-xs"
-                      >
-                        <Icon className={cn("size-3.5 shrink-0", gateColor[g.status])} />
-                        <span className="flex-1">{g.label}</span>
+                      <div key={gate.label} className="flex items-center gap-2 text-xs">
+                        <Icon className={cn("size-3.5 shrink-0", gateColor[gate.status])} />
+                        <span className="flex-1">{gate.label}</span>
                       </div>
                     )
                   })}
@@ -526,13 +568,11 @@ ${sections.join("\n\n---\n\n")}
                   <CardTitle className="text-sm">下一步</CardTitle>
                 </CardHeader>
                 <CardContent className="px-4">
-                  <p className="text-xs text-muted-foreground">
-                    策划案已通过，建议继续完善剧本并提交审核。
-                  </p>
-                  <Button size="sm" className="mt-3 w-full">
-                    继续：剧本
-                    <ChevronRight data-icon="inline-end" />
-                  </Button>
+                  <p className="text-xs text-muted-foreground">当前阶段已保存，建议继续完善文档并提交审核。</p>
+                    <Button size="sm" className="mt-3 w-full" onClick={() => changeStep("script")} disabled={!canEdit}>
+                      继续到剧本
+                      <ChevronRight data-icon="inline-end" />
+                    </Button>
                 </CardContent>
               </Card>
             </div>
@@ -556,28 +596,31 @@ function MarkdownPreview({ content }: { content: string }) {
   const lines = content.split("\n")
   return (
     <div className="flex flex-col gap-2 p-5 text-sm leading-relaxed">
-      {lines.map((line, i) => {
-        if (line.startsWith("# "))
+      {lines.map((line, index) => {
+        if (line.startsWith("# ")) {
           return (
-            <h1 key={i} className="text-xl font-semibold">
+            <h1 key={index} className="text-xl font-semibold">
               {line.slice(2)}
             </h1>
           )
-        if (line.startsWith("## "))
+        }
+        if (line.startsWith("## ")) {
           return (
-            <h2 key={i} className="mt-2 text-base font-semibold">
+            <h2 key={index} className="mt-2 text-base font-semibold">
               {line.slice(3)}
             </h2>
           )
-        if (line.startsWith("- "))
+        }
+        if (line.startsWith("- ")) {
           return (
-            <p key={i} className="ml-4 list-item list-disc">
+            <p key={index} className="ml-4 list-item list-disc">
               {renderInline(line.slice(2))}
             </p>
           )
-        if (line.trim() === "") return <div key={i} className="h-1" />
+        }
+        if (line.trim() === "") return <div key={index} className="h-1" />
         return (
-          <p key={i} className="text-foreground/90">
+          <p key={index} className="text-foreground/90">
             {renderInline(line)}
           </p>
         )
@@ -588,13 +631,13 @@ function MarkdownPreview({ content }: { content: string }) {
 
 function renderInline(text: string) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g)
-  return parts.map((part, i) =>
+  return parts.map((part, index) =>
     part.startsWith("**") && part.endsWith("**") ? (
-      <strong key={i} className="font-semibold">
+      <strong key={index} className="font-semibold">
         {part.slice(2, -2)}
       </strong>
     ) : (
-      <span key={i}>{part}</span>
+      <span key={index}>{part}</span>
     ),
   )
 }
